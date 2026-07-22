@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "rule": "TL1001",
+      "source": "services/orders/module.ts",
+      "line": 1,
+      "column": 37,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/lazy.ts"
+    }
+  ]
+}

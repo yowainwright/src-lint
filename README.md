@@ -1,5 +1,41 @@
 # tree-legibility
 
+Tree Legibility is a fast architecture-conformance linter for imports that cross intended code boundaries.
+
+## Current slice
+
+<!-- implemented languages and inferred boundary conventions from src/check.c -->
+
+The POSIX C CLI currently scans TypeScript and JavaScript static imports, dynamic imports, and `require` calls. With no configuration, it infers sibling boundaries under `services/<name>` and permits target paths under `api/`, `public/`, or `proto/`.
+
+The [implementation issue](docs/issues/0001-build-import-boundary-linter.md) defines configuration inheritance, Python, Go, Proto, caching, discovery, and graph output.
+
+## Build
+
+<!-- build commands matching CMakeLists.txt -->
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+```sh
+cmake -S . -B build-asan -DTREE_LEGIBILITY_SANITIZERS=ON
+cmake --build build-asan --parallel
+ctest --test-dir build-asan --output-on-failure
+```
+
+## Usage
+
+<!-- CLI syntax and exit codes from src/main.c and include/tree_legibility/check.h -->
+
+```sh
+./build/tree-legibility check .
+./build/tree-legibility check . --format json
+```
+
+Exit code `0` is clean, `1` reports policy findings, and `2` reports invalid input or an operational error.
+
 ## Competitive landscape
 
 Tree Legibility turns intended dependency boundaries into executable policy. It protects service, component, package, and Proto ownership from accidental changes by humans and AI.

@@ -1,6 +1,24 @@
 # Prerequisites
 *.d
 
+# Project build output
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+
+# CMake and Ninja output outside the build directory
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+build.ninja
+cmake_install.cmake
+compile_commands.json
+install_manifest.txt
+.ninja_deps
+.ninja_log
+
 # Object files
 *.o
 *.ko
@@ -53,6 +71,18 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Coverage and profiling output
+*.gcda
+*.gcno
+*.profdata
+*.profraw
+
+# Repository-local analysis cache
+/.tree-legibility/cache/
+
+# Operating system files
+.DS_Store
 
 # Beads / Dolt files (added by bd init)
 .dolt/
