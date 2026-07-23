@@ -1,0 +1,4 @@
+syntax = "proto3";
+
+import "services/billing/internal/ledger.proto";
+import public "services/billing/proto/public.proto";

@@ -79,7 +79,7 @@ dkms.conf
 *.profraw
 
 # Repository-local analysis cache
-/.tree-legibility/cache/
+**/.tree-legibility/cache/
 
 # Operating system files
 .DS_Store

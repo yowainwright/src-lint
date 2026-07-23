@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "rule": "TL1001",
+      "source": "services/orders/create.go",
+      "line": 4,
+      "column": 4,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/ledger"
+    }
+  ]
+}

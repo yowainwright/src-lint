@@ -1,0 +1,44 @@
+{
+  "nodes": [
+    {
+      "id": "services/billing/api/index.ts",
+      "boundary": "billing"
+    },
+    {
+      "id": "services/billing/internal/ledger.ts",
+      "boundary": "billing"
+    },
+    {
+      "id": "services/orders/create.ts",
+      "boundary": "orders"
+    }
+  ],
+  "edges": [
+    {
+      "from": "services/orders/create.ts",
+      "to": "services/billing/internal/ledger.ts",
+      "line": 1,
+      "column": 28,
+      "language": "javascript",
+      "status": "violation",
+      "rule": "TL1001",
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "owner": "billing",
+      "suggestedPublicEntry": "services/billing/api"
+    },
+    {
+      "from": "services/orders/create.ts",
+      "to": "services/billing/api/index.ts",
+      "line": 2,
+      "column": 30,
+      "language": "javascript",
+      "status": "allowed",
+      "rule": null,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "owner": "billing",
+      "suggestedPublicEntry": null
+    }
+  ]
+}

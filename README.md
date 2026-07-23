@@ -1,18 +1,27 @@
 # tree-legibility
 
-Tree Legibility is a fast architecture-conformance linter for imports that cross intended code boundaries.
+Tree Legibility is a fast, standalone architecture-conformance linter for imports that cross intended service, component, package, or Proto boundaries.
 
-## Current slice
+## Boundary policy
 
-<!-- implemented languages and inferred boundary conventions from src/check.c -->
+<!-- implemented languages and inferred boundary conventions from src/check.c and src/imports.c -->
 
-The POSIX C CLI currently scans TypeScript and JavaScript static imports, dynamic imports, and `require` calls. With no configuration, it infers sibling boundaries under `services/<name>` and permits target paths under `api/`, `public/`, or `proto/`.
+With no rc file, the CLI treats sibling directories under `services/<name>` as boundaries. Cross-service imports may target `api/`, `public/`, or `proto/`; direct traversal into other paths fails with `TL1001`.
 
-The [implementation issue](docs/issues/0001-build-import-boundary-linter.md) defines configuration inheritance, Python, Go, Proto, caching, discovery, and graph output.
+| Source | Imports recognized |
+| --- | --- |
+| TypeScript and JavaScript | Static imports, re-exports, dynamic `import()`, and `require()` |
+| Python | `from … import …` and `import …` |
+| Go | Single and grouped imports |
+| Proto | Regular, `public`, and `weak` imports |
+
+Explicit policy takes precedence over inference. Unresolved local imports are `TL2001` advisories by default and errors under `--strict`.
 
 ## Build
 
-<!-- build commands matching CMakeLists.txt -->
+<!-- build commands and sanitizer option matching CMakeLists.txt -->
+
+The executable is C11 and has no runtime dependency. POSIX `fts` and `realpath` are currently required.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -27,14 +36,79 @@ ctest --test-dir build-asan --output-on-failure
 
 ## Usage
 
-<!-- CLI syntax and exit codes from src/main.c and include/tree_legibility/check.h -->
+<!-- CLI syntax, formats, and exit codes from src/main.c and include/tree_legibility/check.h -->
 
-```sh
-./build/tree-legibility check .
-./build/tree-legibility check . --format json
+```text
+tree-legibility check [path] [--strict] [--format text|json]
+tree-legibility discover [path] [--format text|json]
+tree-legibility graph [path] [--format json|html]
 ```
 
-Exit code `0` is clean, `1` reports policy findings, and `2` reports invalid input or an operational error.
+```sh
+./build/tree-legibility check services/orders --strict --format json
+./build/tree-legibility discover . --format json
+./build/tree-legibility graph . --format json > dependency-graph.json
+./build/tree-legibility graph . --format html > dependency-graph.html
+```
+
+`discover` reports configured or inferred boundaries with source-file counts. JSON graph output contains deterministic nodes and edges. Violation edges carry source coordinates, source and target ownership, the rule, and a suggested public entry. HTML output is a self-contained boundary filter and pan-and-zoom dependency canvas.
+
+Exit code `0` means clean, `1` means policy findings exist, and `2` means invalid input, configuration, or operation.
+
+## Configuration
+
+<!-- rc filenames, schema, defaults, and inheritance from src/config.c and src/config.h -->
+
+Place one rc file at the repository root:
+
+- `.tree-legibilityrc.toml`
+- `.tree-legibilityrc.json`
+- `.tree-legibilityrc.yaml`
+- `.tree-legibilityrc.yml`
+
+All formats use the same model. More than one recognized rc file in a directory is invalid.
+
+```toml
+version = 1
+strict = false
+
+[cache]
+max_mib = 8
+
+[boundaries.orders]
+root = "services/orders"
+allow = ["shared/**"]
+
+[boundaries.billing]
+root = "services/billing"
+public = ["api/**", "proto/**"]
+```
+
+A nested rc file inherits its ancestors within the repository. Boundary maps merge by name. Child scalar and array values replace parent values.
+
+`allow` belongs to the importing boundary and matches repository-relative targets. `public` belongs to the imported boundary and matches paths inside it.
+
+## Cache
+
+<!-- cache location, key inputs, default limit, and eviction from src/cache.c and src/config.h -->
+
+Parsed imports are cached per repository in `.tree-legibility/cache/`. The default hard limit is 8 MiB; `cache.max_mib = 0` disables it.
+
+Keys include tool, parser, and cache versions, effective configuration, file path, and source content. Least-recently-used records are trimmed by stored bytes. The cache is safe to delete and ignored by the supplied [`.gitignore`](.gitignore).
+
+Release tests generate a 10,000-file repository and enforce the 10 ms startup and 50 ms warm one-file budgets.
+
+## Development
+
+<!-- test command and test registration matching CMakeLists.txt and tests/CMakeLists.txt -->
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+CLI-level fixtures cover each adapter, zero-config and configured policy, rc parity and inheritance, strict advisories, cache reuse and limits, discovery, JSON, and HTML.
 
 ## Competitive landscape
 

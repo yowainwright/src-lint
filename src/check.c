@@ -1,17 +1,25 @@
 #include "tree_legibility/check.h"
+#include "cache.h"
+#include "config.h"
+#include "graph.h"
+#include "internal.h"
 
 #include <fts.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define TL_PATH_CAPACITY 4096
+#include <sys/stat.h>
 
 typedef struct {
   char root[TL_PATH_CAPACITY];
+  TlCommand command;
   TlFormat format;
+  bool strict;
+  bool graph_failed;
   size_t emitted;
+  TlCacheSet caches;
+  TlGraph graph;
   FILE *output;
   FILE *errors;
 } TlContext;
@@ -22,20 +30,13 @@ typedef struct {
 } TlOwner;
 
 typedef struct {
-  char *start;
-  size_t length;
-} TlToken;
-
-typedef struct {
-  char *specifier;
-  char *end;
-} TlImportEdge;
-
-typedef struct {
-  char *source_start;
-  char *cursor;
-  bool expect_from;
-} TlJsScanner;
+  bool applied;
+  bool violation;
+  TlOwner source_owner;
+  TlOwner target_owner;
+  const TlBoundaryConfig *target_boundary;
+  size_t boundary_offset;
+} TlEdgePolicy;
 
 static bool starts_with(const char *value, const char *prefix) {
   return strncmp(value, prefix, strlen(prefix)) == 0;
@@ -47,7 +48,9 @@ static bool has_source_extension(const char *path) {
   return strcmp(extension, ".ts") == 0 || strcmp(extension, ".tsx") == 0 ||
          strcmp(extension, ".mts") == 0 || strcmp(extension, ".cts") == 0 ||
          strcmp(extension, ".js") == 0 || strcmp(extension, ".jsx") == 0 ||
-         strcmp(extension, ".mjs") == 0 || strcmp(extension, ".cjs") == 0;
+         strcmp(extension, ".mjs") == 0 || strcmp(extension, ".cjs") == 0 ||
+         strcmp(extension, ".py") == 0 || strcmp(extension, ".go") == 0 ||
+         strcmp(extension, ".proto") == 0;
 }
 
 static bool ignored_directory(const char *name) {
@@ -102,175 +105,6 @@ static char *load_file(const char *path, FILE *errors) {
   fclose(file);
   if (!content) report_read_error(errors, path);
   return content;
-}
-
-static bool quote_character(char character) {
-  return character == '\'' || character == '"' || character == '`';
-}
-
-static char *quoted_end(char *cursor) {
-  const char quote = *cursor;
-  cursor += 1;
-  while (*cursor) {
-    if (*cursor == '\\' && cursor[1]) {
-      cursor += 2;
-      continue;
-    }
-    if (*cursor == quote) return cursor;
-    cursor += 1;
-  }
-  return NULL;
-}
-
-static char *skip_quoted(char *cursor) {
-  char *end = quoted_end(cursor);
-  return end ? end + 1 : cursor + strlen(cursor);
-}
-
-static bool identifier_start(char character) {
-  const bool lowercase = character >= 'a' && character <= 'z';
-  const bool uppercase = character >= 'A' && character <= 'Z';
-  return lowercase || uppercase || character == '_' || character == '$';
-}
-
-static bool identifier_part(char character) {
-  return identifier_start(character) || (character >= '0' && character <= '9');
-}
-
-static bool token_is(const TlToken *token, const char *value) {
-  return strlen(value) == token->length && strncmp(token->start, value, token->length) == 0;
-}
-
-static char *skip_space(char *cursor) {
-  while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') cursor += 1;
-  return cursor;
-}
-
-static bool block_comment_start(const char *cursor) { return cursor[0] == '/' && cursor[1] == '*'; }
-
-static bool line_comment_start(const char *cursor) { return cursor[0] == '/' && cursor[1] == '/'; }
-
-static char *skip_block_comment(char *cursor) {
-  char *end = strstr(cursor + 2, "*/");
-  return end ? end + 2 : cursor + strlen(cursor);
-}
-
-static char *skip_line_comment(char *cursor) {
-  char *end = strchr(cursor + 2, '\n');
-  return end ? end + 1 : cursor + strlen(cursor);
-}
-
-static char *skip_js_trivia(char *cursor) {
-  while (*cursor) {
-    cursor = skip_space(cursor);
-    if (block_comment_start(cursor)) {
-      cursor = skip_block_comment(cursor);
-      continue;
-    }
-    if (!line_comment_start(cursor)) return cursor;
-    cursor = skip_line_comment(cursor);
-  }
-  return cursor;
-}
-
-static bool read_identifier(TlJsScanner *scanner, TlToken *token) {
-  if (!identifier_start(*scanner->cursor)) return false;
-  token->start = scanner->cursor;
-  scanner->cursor += 1;
-  while (identifier_part(*scanner->cursor)) scanner->cursor += 1;
-  token->length = (size_t)(scanner->cursor - token->start);
-  return true;
-}
-
-static bool next_js_token(TlJsScanner *scanner, TlToken *token) {
-  while (*scanner->cursor) {
-    if (line_comment_start(scanner->cursor)) {
-      scanner->cursor = skip_line_comment(scanner->cursor);
-      continue;
-    }
-    if (block_comment_start(scanner->cursor)) {
-      scanner->cursor = skip_block_comment(scanner->cursor);
-      continue;
-    }
-    if (quote_character(*scanner->cursor)) {
-      scanner->cursor = skip_quoted(scanner->cursor);
-      continue;
-    }
-    if (read_identifier(scanner, token)) return true;
-    if (*scanner->cursor == ';') scanner->expect_from = false;
-    scanner->cursor += 1;
-  }
-  return false;
-}
-
-static bool read_quoted_import(char *cursor, TlImportEdge *edge) {
-  cursor = skip_js_trivia(cursor);
-  if (*cursor != '\'' && *cursor != '"') return false;
-  char *end = quoted_end(cursor);
-  if (!end) return false;
-  edge->specifier = cursor + 1;
-  edge->end = end;
-  return true;
-}
-
-static bool read_call_import(TlJsScanner *scanner, TlImportEdge *edge) {
-  char *cursor = skip_js_trivia(scanner->cursor);
-  if (*cursor != '(') return false;
-  if (!read_quoted_import(cursor + 1, edge)) return false;
-  scanner->cursor = edge->end + 1;
-  return true;
-}
-
-static bool read_direct_import(TlJsScanner *scanner, TlImportEdge *edge) {
-  if (!read_quoted_import(scanner->cursor, edge)) return false;
-  scanner->cursor = edge->end + 1;
-  return true;
-}
-
-static bool read_import_keyword(TlJsScanner *scanner, TlImportEdge *edge) {
-  scanner->expect_from = true;
-  if (read_call_import(scanner, edge)) {
-    scanner->expect_from = false;
-    return true;
-  }
-  if (!read_direct_import(scanner, edge)) return false;
-  scanner->expect_from = false;
-  return true;
-}
-
-static bool bare_token(const TlJsScanner *scanner, const TlToken *token) {
-  char *cursor = token->start;
-  while (cursor > scanner->source_start) {
-    const char previous = cursor[-1];
-    const bool whitespace =
-        previous == ' ' || previous == '\t' || previous == '\r' || previous == '\n';
-    if (!whitespace) break;
-    cursor -= 1;
-  }
-  return cursor == scanner->source_start || cursor[-1] != '.';
-}
-
-static bool import_token(TlJsScanner *scanner, const TlToken *token, TlImportEdge *edge) {
-  const bool bare = bare_token(scanner, token);
-  if (bare && token_is(token, "require")) return read_call_import(scanner, edge);
-  if (bare && token_is(token, "export")) {
-    scanner->expect_from = true;
-    return false;
-  }
-  if (token_is(token, "from") && scanner->expect_from) {
-    scanner->expect_from = false;
-    return read_direct_import(scanner, edge);
-  }
-  if (bare && token_is(token, "import")) return read_import_keyword(scanner, edge);
-  return false;
-}
-
-static bool next_js_import(TlJsScanner *scanner, TlImportEdge *edge) {
-  TlToken token;
-  while (next_js_token(scanner, &token)) {
-    if (import_token(scanner, &token, edge)) return true;
-  }
-  return false;
 }
 
 static bool same_segment(const char *segment, size_t length, const char *value) {
@@ -378,9 +212,191 @@ static bool read_boundary_owners(const char *source, const char *target, TlOwner
   return false;
 }
 
+static const char *last_services_segment(const char *path) {
+  const char *cursor = path;
+  const char *selected = NULL;
+  const char *segment;
+  while ((segment = next_services_segment(path, cursor)) != NULL) {
+    TlOwner owner;
+    if (read_owner_name(segment + strlen("services/"), &owner) && *owner.inside) {
+      selected = segment;
+    }
+    cursor = segment + strlen("services");
+  }
+  return selected;
+}
+
+static const char *scan_relative_path(const TlContext *context, const char *path) {
+  struct stat information;
+  if (stat(context->root, &information) != 0 || !S_ISDIR(information.st_mode)) return path;
+  const char *root = context->root[0] == '/' ? context->root + 1 : context->root;
+  const size_t length = strlen(root);
+  if (strncmp(path, root, length) != 0 || path[length] != '/') return path;
+  return path + length + 1;
+}
+
+static const char *inferred_services_segment(const TlContext *context, const char *path) {
+  const char *relative = scan_relative_path(context, path);
+  if (relative == path) return last_services_segment(path);
+  const char *segment = next_services_segment(relative, relative);
+  return segment ? segment : last_services_segment(path);
+}
+
+static const char *services_specifier(const char *specifier) {
+  if (starts_with(specifier, "services/")) return specifier;
+  const char *segment = strstr(specifier, "/services/");
+  return segment ? segment + 1 : NULL;
+}
+
+typedef enum { TL_PATH_MISSING, TL_PATH_FILE, TL_PATH_DIRECTORY } TlPathKind;
+
+static TlPathKind repository_path_kind(const char *path) {
+  char absolute[TL_PATH_CAPACITY];
+  const int written = snprintf(absolute, sizeof(absolute), "/%s", path);
+  if (written < 0 || (size_t)written >= sizeof(absolute)) return TL_PATH_MISSING;
+  struct stat information;
+  if (stat(absolute, &information) != 0) return TL_PATH_MISSING;
+  return S_ISDIR(information.st_mode) ? TL_PATH_DIRECTORY : TL_PATH_FILE;
+}
+
+static bool resolve_suffix(char *path, const char *suffix) {
+  char candidate[TL_PATH_CAPACITY];
+  const int written = snprintf(candidate, sizeof(candidate), "%s%s", path, suffix);
+  if (written < 0 || (size_t)written >= sizeof(candidate)) return false;
+  if (repository_path_kind(candidate) != TL_PATH_FILE) return false;
+  strcpy(path, candidate);
+  return true;
+}
+
+static bool resolve_suffixes(char *path, const char *const *suffixes, size_t count) {
+  for (size_t index = 0; index < count; index += 1) {
+    if (resolve_suffix(path, suffixes[index])) return true;
+  }
+  return false;
+}
+
+static bool resolve_javascript_path(char *path, TlPathKind kind) {
+  static const char *const extensions[] = {".ts", ".tsx", ".mts", ".cts",
+                                           ".js", ".jsx", ".mjs", ".cjs"};
+  static const char *const indexes[] = {"/index.ts", "/index.tsx", "/index.mts", "/index.cts",
+                                        "/index.js", "/index.jsx", "/index.mjs", "/index.cjs"};
+  if (kind != TL_PATH_DIRECTORY) {
+    return resolve_suffixes(path, extensions, sizeof(extensions) / sizeof(*extensions));
+  }
+  (void)resolve_suffixes(path, indexes, sizeof(indexes) / sizeof(*indexes));
+  return true;
+}
+
+static bool resolve_python_path(char *path, TlPathKind kind) {
+  if (kind != TL_PATH_DIRECTORY) return resolve_suffix(path, ".py");
+  (void)resolve_suffix(path, "/__init__.py");
+  return true;
+}
+
+static bool resolve_repository_path(char *path, TlLanguage language) {
+  const TlPathKind kind = repository_path_kind(path);
+  if (kind == TL_PATH_FILE) return true;
+  if (language == TL_LANGUAGE_JAVASCRIPT) return resolve_javascript_path(path, kind);
+  if (language == TL_LANGUAGE_PYTHON) return resolve_python_path(path, kind);
+  return kind == TL_PATH_DIRECTORY;
+}
+
+static bool build_services_target(const char *source, const char *segment, const char *specifier,
+                                  char *target) {
+  const size_t prefix_length = (size_t)(segment - source);
+  const size_t target_length = prefix_length + strlen(specifier);
+  if (target_length >= TL_PATH_CAPACITY) return false;
+  memcpy(target, source, prefix_length);
+  memcpy(target + prefix_length, specifier, strlen(specifier) + 1);
+  return true;
+}
+
+static bool resolve_services_import(const TlContext *context, const char *source,
+                                    const TlImport *import, char *target) {
+  const char *specifier = import->specifier;
+  const char *services = services_specifier(specifier);
+  if (!services) return false;
+  const char *segment = inferred_services_segment(context, source);
+  char joined[TL_PATH_CAPACITY];
+  if (!segment || !build_services_target(source, segment, services, joined)) return false;
+  return normalize_path(joined, target);
+}
+
+static const char *find_root_match(const char *specifier, const char *root) {
+  const size_t length = strlen(root);
+  const char *cursor = specifier;
+  while ((cursor = strstr(cursor, root)) != NULL) {
+    const bool left = cursor == specifier || cursor[-1] == '/';
+    const bool right = cursor[length] == '/' || cursor[length] == '\0';
+    if (left && right) return cursor;
+    cursor += 1;
+  }
+  return NULL;
+}
+
+static const char *specifier_boundary_root(const TlConfig *config, const char *specifier) {
+  const char *selected = NULL;
+  size_t longest = 0;
+  for (size_t index = 0; index < config->boundary_count; index += 1) {
+    const char *root = config->boundaries[index].root;
+    const char *match = root ? find_root_match(specifier, root) : NULL;
+    if (match && strlen(root) > longest) {
+      selected = match;
+      longest = strlen(root);
+    }
+  }
+  return selected;
+}
+
+static bool resolve_configured_import(const TlConfig *config, const char *specifier, char *target) {
+  if (!config->present) return false;
+  const char *relative = specifier_boundary_root(config, specifier);
+  if (!relative) return false;
+  char joined[TL_PATH_CAPACITY];
+  const int written =
+      snprintf(joined, TL_PATH_CAPACITY, "%s/%s", config->repository_root, relative);
+  if (written < 0 || written >= TL_PATH_CAPACITY) return false;
+  return normalize_path(joined, target);
+}
+
+static bool resolve_import_target(const TlContext *context, const TlConfig *config,
+                                  const char *source, const TlImport *import, char *target) {
+  if (import->specifier[0] == '.') return resolve_import(source, import->specifier, target);
+  if (resolve_configured_import(config, import->specifier, target)) return true;
+  return resolve_services_import(context, source, import, target);
+}
+
+static bool at_or_below(const char *path, const char *entry) {
+  if (strcmp(path, entry) == 0) return true;
+  const size_t length = strlen(entry);
+  return strncmp(path, entry, length) == 0 && path[length] == '/';
+}
+
 static bool public_entry(const char *inside) {
-  return starts_with(inside, "api/") || starts_with(inside, "public/") ||
-         starts_with(inside, "proto/");
+  return at_or_below(inside, "api") || at_or_below(inside, "public") ||
+         at_or_below(inside, "proto");
+}
+
+static bool copy_owner_name(TlOwner *owner, const char *name, const char *inside) {
+  const size_t length = strlen(name);
+  if (length == 0 || length >= sizeof(owner->name)) return false;
+  memcpy(owner->name, name, length + 1);
+  owner->inside = inside;
+  return true;
+}
+
+static bool configured_owner(const TlConfig *config, const char *path, TlOwner *owner,
+                             const TlBoundaryConfig **boundary) {
+  const char *inside;
+  if (!tl_config_boundary_for_path(config, path, boundary, &inside)) return false;
+  return copy_owner_name(owner, (*boundary)->name, inside);
+}
+
+static const char *config_relative_path(const TlConfig *config, const char *path) {
+  const size_t length = strlen(config->repository_root);
+  if (length == 0 || strncmp(path, config->repository_root, length) != 0) return path;
+  const char *relative = path + length;
+  return *relative == '/' ? relative + 1 : relative;
 }
 
 static const char *json_escape(unsigned char character) {
@@ -449,6 +465,11 @@ static void emit_text_violation(const TlContext *context, const char *source, si
 static void emit_violation(TlContext *context, const char *source, size_t line, size_t column,
                            const TlOwner *source_owner, const TlOwner *target_owner,
                            const char *target) {
+  const bool insight_command = context->command != TL_COMMAND_CHECK;
+  if (insight_command) {
+    context->emitted += 1;
+    return;
+  }
   if (context->format == TL_FORMAT_JSON) {
     emit_json_violation(context, source, line, column, source_owner, target_owner, target);
   } else {
@@ -457,62 +478,286 @@ static void emit_violation(TlContext *context, const char *source, size_t line, 
   context->emitted += 1;
 }
 
-static int evaluate_import(TlContext *context, const char *source, const char *specifier,
-                           size_t line, size_t column) {
-  if (specifier[0] != '.') return 0;
-  char target[TL_PATH_CAPACITY];
-  if (!resolve_import(source, specifier, target)) return 0;
-  TlOwner source_owner;
-  TlOwner target_owner;
-  size_t boundary_offset;
-  if (!read_boundary_owners(source, target, &source_owner, &target_owner, &boundary_offset))
-    return 0;
-  if (public_entry(target_owner.inside)) return 0;
-  emit_violation(context, source + boundary_offset, line, column, &source_owner, &target_owner,
-                 target + boundary_offset);
+static const char *inferred_relative_path(const TlContext *context, const char *path) {
+  const char *segment = inferred_services_segment(context, path);
+  return segment ? segment : path;
+}
+
+static const char *diagnostic_path(const TlContext *context, const TlConfig *config,
+                                   const char *path) {
+  if (config->present) return config_relative_path(config, path);
+  return inferred_relative_path(context, path);
+}
+
+static bool inferred_owner(const TlContext *context, const char *path, TlOwner *owner) {
+  const char *segment = inferred_services_segment(context, path);
+  if (!segment) return false;
+  return read_owner_name(segment + strlen("services/"), owner);
+}
+
+static const char *boundary_name(const TlContext *context, const TlConfig *config, const char *path,
+                                 TlOwner *owner) {
+  const TlBoundaryConfig *boundary;
+  if (configured_owner(config, path, owner, &boundary)) return owner->name;
+  if (inferred_owner(context, path, owner)) return owner->name;
+  return "";
+}
+
+static void add_graph_node(TlContext *context, const TlConfig *config, const char *path) {
+  if (context->command != TL_COMMAND_GRAPH || context->graph_failed) return;
+  TlOwner owner;
+  const char *display = diagnostic_path(context, config, path);
+  const char *boundary = boundary_name(context, config, path, &owner);
+  context->graph_failed = !tl_graph_add_node(&context->graph, display, boundary);
+}
+
+static const char *policy_owner(const TlOwner *owner) {
+  return owner && owner->name[0] ? owner->name : NULL;
+}
+
+static TlGraphEdgeInput graph_edge_input(TlContext *context, const TlConfig *config,
+                                         const char *source, const char *target,
+                                         const TlImport *import, TlEdgeStatus status,
+                                         const char *rule, const TlEdgePolicy *policy,
+                                         const char *suggestion) {
+  const char *from = diagnostic_path(context, config, source);
+  const char *to = diagnostic_path(context, config, target);
+  const char *source_boundary = policy ? policy_owner(&policy->source_owner) : NULL;
+  const char *target_boundary = policy ? policy_owner(&policy->target_owner) : NULL;
+  return (TlGraphEdgeInput){from,   to,   import->line,    import->column,  import->language,
+                            status, rule, source_boundary, target_boundary, suggestion};
+}
+
+static void add_graph_edge(TlContext *context, const TlConfig *config, const char *source,
+                           const char *target, const TlImport *import, TlEdgeStatus status,
+                           const char *rule, const TlEdgePolicy *policy, const char *suggestion) {
+  if (context->command != TL_COMMAND_GRAPH || context->graph_failed) return;
+  add_graph_node(context, config, source);
+  add_graph_node(context, config, target);
+  if (context->graph_failed) return;
+  const TlGraphEdgeInput input =
+      graph_edge_input(context, config, source, target, import, status, rule, policy, suggestion);
+  context->graph_failed = !tl_graph_add_edge(&context->graph, &input);
+}
+
+static bool add_configured_boundary(TlContext *context, const TlConfig *config, const char *path) {
+  const TlBoundaryConfig *boundary;
+  const char *inside;
+  if (!tl_config_boundary_for_path(config, path, &boundary, &inside)) return false;
+  context->graph_failed =
+      !tl_graph_add_boundary(&context->graph, boundary->name, boundary->root, "configured");
+  return true;
+}
+
+static bool inferred_boundary(const TlContext *context, const char *path, TlOwner *owner,
+                              char *root) {
+  if (!inferred_owner(context, path, owner)) return false;
+  const int written = snprintf(root, TL_PATH_CAPACITY, "services/%s", owner->name);
+  return written >= 0 && written < TL_PATH_CAPACITY;
+}
+
+static void add_discovered_boundary(TlContext *context, const TlConfig *config, const char *path) {
+  if (context->command != TL_COMMAND_DISCOVER || context->graph_failed) return;
+  if (add_configured_boundary(context, config, path)) return;
+  TlOwner owner;
+  char root[TL_PATH_CAPACITY];
+  if (!inferred_boundary(context, path, &owner, root)) return;
+  context->graph_failed = !tl_graph_add_boundary(&context->graph, owner.name, root, "inferred");
+}
+
+static void emit_json_unresolved(TlContext *context, const char *source, const char *target,
+                                 const TlImport *import, bool strict) {
+  if (context->emitted > 0) fputs(",\n", context->output);
+  fputs("    {\n", context->output);
+  write_json_field(context->output, "rule", "TL2001");
+  write_json_field(context->output, "source", source);
+  fprintf(context->output, "      \"line\": %zu,\n", import->line);
+  fprintf(context->output, "      \"column\": %zu,\n", import->column);
+  write_json_field(context->output, "severity", strict ? "error" : "advisory");
+  fprintf(context->output, "      \"target\": ");
+  write_json_string(context->output, target);
+  fputs("\n    }", context->output);
+}
+
+static void emit_check_unresolved(TlContext *context, const char *source, const char *target,
+                                  const TlImport *import, bool strict) {
+  if (context->format == TL_FORMAT_JSON) {
+    emit_json_unresolved(context, source, target, import, strict);
+  } else {
+    fprintf(context->output, "%s:%zu:%zu TL2001 unresolved import -> %s\n", source, import->line,
+            import->column, target);
+  }
+}
+
+static int emit_unresolved(TlContext *context, const TlConfig *config, const char *source,
+                           const char *target, const TlImport *import) {
+  const char *display_source = diagnostic_path(context, config, source);
+  const char *display_target = diagnostic_path(context, config, target);
+  const bool strict = context->strict || config->strict;
+  const TlEdgeStatus status = strict ? TL_EDGE_ERROR : TL_EDGE_ADVISORY;
+  add_graph_edge(context, config, source, target, import, status, "TL2001", NULL, NULL);
+  const bool insight_command = context->command != TL_COMMAND_CHECK;
+  if (insight_command) {
+    context->emitted += 1;
+    return strict ? 1 : 0;
+  }
+  emit_check_unresolved(context, display_source, display_target, import, strict);
+  context->emitted += 1;
+  return strict ? 1 : 0;
+}
+
+static void set_unowned(TlOwner *owner) { (void)copy_owner_name(owner, "unowned", ""); }
+
+static bool read_source_owner(TlContext *context, const TlConfig *config, const char *source,
+                              TlEdgePolicy *policy, const TlBoundaryConfig **boundary) {
+  if (configured_owner(config, source, &policy->source_owner, boundary)) return true;
+  if (inferred_owner(context, source, &policy->source_owner)) return false;
+  set_unowned(&policy->source_owner);
+  return false;
+}
+
+static bool classify_configured(TlContext *context, const TlConfig *config, const char *source,
+                                const char *target, TlEdgePolicy *policy) {
+  const TlBoundaryConfig *source_boundary;
+  const bool has_target =
+      configured_owner(config, target, &policy->target_owner, &policy->target_boundary);
+  if (!has_target) return false;
+  const bool has_source = read_source_owner(context, config, source, policy, &source_boundary);
+  const bool same_boundary =
+      has_source && strcmp(policy->source_owner.name, policy->target_owner.name) == 0;
+  const char *relative_target = config_relative_path(config, target);
+  const bool public_target =
+      tl_config_public_entry(policy->target_boundary, policy->target_owner.inside);
+  const bool allowed_target =
+      has_source && tl_config_allowed_target(source_boundary, relative_target);
+  policy->applied = true;
+  policy->violation = !same_boundary && !public_target && !allowed_target;
+  return true;
+}
+
+static void classify_inferred(const char *source, const char *target, TlEdgePolicy *policy) {
+  const bool crosses = read_boundary_owners(source, target, &policy->source_owner,
+                                            &policy->target_owner, &policy->boundary_offset);
+  policy->applied = crosses;
+  policy->violation = crosses && !public_entry(policy->target_owner.inside);
+}
+
+static void classify_policy(TlContext *context, const TlConfig *config, const char *source,
+                            const char *target, TlEdgePolicy *policy) {
+  *policy = (TlEdgePolicy){0};
+  if (classify_configured(context, config, source, target, policy)) return;
+  classify_inferred(source, target, policy);
+}
+
+static size_t public_prefix_length(const char *pattern) {
+  size_t length = strcspn(pattern, "*");
+  while (length > 0 && pattern[length - 1] == '/') length -= 1;
+  return length;
+}
+
+static bool configured_suggestion(const TlBoundaryConfig *boundary, char *suggestion) {
+  if (!boundary || !boundary->root) return false;
+  const char *entry = boundary->public_entries.count ? boundary->public_entries.items[0] : "api";
+  const size_t length = public_prefix_length(entry);
+  if (length == 0) entry = "api";
+  const size_t entry_length = length == 0 ? strlen(entry) : length;
+  const int written =
+      snprintf(suggestion, TL_PATH_CAPACITY, "%s/%.*s", boundary->root, (int)entry_length, entry);
+  return written >= 0 && written < TL_PATH_CAPACITY;
+}
+
+static bool inferred_suggestion(const TlEdgePolicy *policy, char *suggestion) {
+  const int written =
+      snprintf(suggestion, TL_PATH_CAPACITY, "services/%s/api", policy->target_owner.name);
+  return written >= 0 && written < TL_PATH_CAPACITY;
+}
+
+static const char *public_suggestion(const TlEdgePolicy *policy, char *suggestion) {
+  const bool built = policy->target_boundary
+                         ? configured_suggestion(policy->target_boundary, suggestion)
+                         : inferred_suggestion(policy, suggestion);
+  return built ? suggestion : NULL;
+}
+
+static int emit_policy_violation(TlContext *context, const TlConfig *config, const char *source,
+                                 const char *target, const TlImport *import,
+                                 const TlEdgePolicy *policy) {
+  char suggestion[TL_PATH_CAPACITY];
+  const char *entry = public_suggestion(policy, suggestion);
+  add_graph_edge(context, config, source, target, import, TL_EDGE_VIOLATION, "TL1001", policy,
+                 entry);
+  const char *display_source = diagnostic_path(context, config, source);
+  const char *display_target = diagnostic_path(context, config, target);
+  emit_violation(context, display_source, import->line, import->column, &policy->source_owner,
+                 &policy->target_owner, display_target);
   return 1;
 }
 
-static int evaluate_edge(TlContext *context, const char *source, size_t line, size_t column,
-                         TlImportEdge *edge) {
-  const char saved = *edge->end;
-  *edge->end = '\0';
-  const int result = evaluate_import(context, source, edge->specifier, line, column);
-  *edge->end = saved;
-  return result;
+static int evaluate_import(TlContext *context, const TlConfig *config, const char *source,
+                           const TlImport *import) {
+  char target[TL_PATH_CAPACITY];
+  if (!resolve_import_target(context, config, source, import, target)) return 0;
+  const bool resolved = resolve_repository_path(target, import->language);
+  TlEdgePolicy policy;
+  classify_policy(context, config, source, target, &policy);
+  if (policy.violation)
+    return emit_policy_violation(context, config, source, target, import, &policy);
+  if (!resolved) return emit_unresolved(context, config, source, target, import);
+  const TlEdgePolicy *metadata = policy.applied ? &policy : NULL;
+  add_graph_edge(context, config, source, target, import, TL_EDGE_ALLOWED, NULL, metadata, NULL);
+  return 0;
 }
 
-static void advance_position(char **cursor, const char *target, size_t *line, size_t *column) {
-  while (*cursor < target) {
-    if (**cursor == '\n') {
-      *line += 1;
-      *column = 1;
-    } else {
-      *column += 1;
-    }
-    *cursor += 1;
-  }
-}
-
-static int scan_content(TlContext *context, const char *source, char *content) {
-  TlJsScanner scanner = {content, content, false};
-  char *position = content;
-  size_t line = 1;
-  size_t column = 1;
+static int evaluate_imports(TlContext *context, const TlConfig *config, const char *source,
+                            const TlImportList *imports) {
   int findings = 0;
-  TlImportEdge edge;
-  while (next_js_import(&scanner, &edge)) {
-    advance_position(&position, edge.specifier, &line, &column);
-    findings += evaluate_edge(context, source, line, column, &edge);
+  for (size_t index = 0; index < imports->count; index += 1) {
+    findings += evaluate_import(context, config, source, &imports->items[index]);
   }
+  return findings;
+}
+
+static bool collect_imports(TlContext *context, const TlConfig *config, const char *source_path,
+                            const char *source, char *content, TlImportList *imports) {
+  TlCache cache;
+  const bool cache_ready = tl_cache_init(&cache, config, source_path, context->root);
+  if (cache_ready && !tl_cache_set_add(&context->caches, &cache)) cache.enabled = false;
+  if (cache_ready && tl_cache_load(&cache, source_path, content, imports)) return true;
+  if (!tl_parse_imports(source, content, imports)) {
+    report_path_error(context->errors, "analyze ", source);
+    return false;
+  }
+  const size_t stored_bytes =
+      cache_ready ? tl_cache_store(&cache, source_path, content, imports) : 0;
+  tl_cache_set_record(&context->caches, &cache, stored_bytes);
+  return true;
+}
+
+static int scan_content(TlContext *context, const TlConfig *config, const char *source_path,
+                        const char *source, char *content) {
+  TlImportList imports = {0};
+  if (!collect_imports(context, config, source_path, source, content, &imports)) {
+    tl_import_list_free(&imports);
+    return -1;
+  }
+  const int findings = evaluate_imports(context, config, source, &imports);
+  tl_import_list_free(&imports);
   return findings;
 }
 
 static int scan_file(TlContext *context, const char *path) {
   char *content = load_file(path, context->errors);
   if (!content) return -1;
+  TlConfig config;
+  if (!tl_config_load_for_file(path, &config, context->errors)) {
+    free(content);
+    return -1;
+  }
   const char *source = path[0] == '/' ? path + 1 : path;
-  const int findings = scan_content(context, source, content);
+  add_graph_node(context, &config, source);
+  add_discovered_boundary(context, &config, source);
+  const int findings = scan_content(context, &config, path, source, content);
+  tl_config_free(&config);
   free(content);
   return findings;
 }
@@ -576,13 +821,83 @@ static int scan_tree(TlContext *context) {
   return close_tree(context, tree, findings);
 }
 
-int tl_check(const TlCheckOptions *options, FILE *output, FILE *errors) {
-  if (!options || !options->root || !output || !errors) return 2;
-  TlContext context = {{0}, options->format, 0, output, errors};
-  if (!set_scan_root(&context, options->root)) return 2;
-  if (context.format == TL_FORMAT_JSON) fputs("{\n  \"findings\": [\n", output);
-  const int findings = scan_tree(&context);
-  if (context.format == TL_FORMAT_JSON) fputs("\n  ]\n}\n", output);
-  if (findings < 0) return 2;
+static bool writes_check_json(const TlContext *context) {
+  return context->command == TL_COMMAND_CHECK && context->format == TL_FORMAT_JSON;
+}
+
+static bool write_graph(TlContext *context) {
+  if (context->command != TL_COMMAND_GRAPH || context->graph_failed) return !context->graph_failed;
+  if (context->format == TL_FORMAT_HTML) {
+    return tl_graph_write_html(&context->graph, context->output);
+  }
+  return tl_graph_write_json(&context->graph, context->output);
+}
+
+static bool write_discovery(TlContext *context) {
+  if (context->command != TL_COMMAND_DISCOVER || context->graph_failed) {
+    return !context->graph_failed;
+  }
+  if (context->format == TL_FORMAT_JSON) {
+    return tl_graph_write_discovery_json(&context->graph, context->output);
+  }
+  return tl_graph_write_discovery_text(&context->graph, context->output);
+}
+
+static bool valid_command(TlCommand command) {
+  return command == TL_COMMAND_CHECK || command == TL_COMMAND_DISCOVER ||
+         command == TL_COMMAND_GRAPH;
+}
+
+static bool valid_format(TlFormat format) {
+  return format == TL_FORMAT_TEXT || format == TL_FORMAT_JSON || format == TL_FORMAT_HTML;
+}
+
+static bool valid_options(const TlRunOptions *options) {
+  if (!options || !options->root || options->root[0] == '\0') return false;
+  if (!valid_command(options->command) || !valid_format(options->format)) return false;
+  if (options->command == TL_COMMAND_GRAPH)
+    return !options->strict && options->format != TL_FORMAT_TEXT;
+  if (options->format == TL_FORMAT_HTML) return false;
+  return !options->strict || options->command == TL_COMMAND_CHECK;
+}
+
+static TlContext make_context(const TlRunOptions *options, FILE *output, FILE *errors) {
+  return (TlContext){.command = options->command,
+                     .format = options->format,
+                     .strict = options->strict,
+                     .output = output,
+                     .errors = errors};
+}
+
+static bool write_scan_output(TlContext *context) {
+  if (!write_graph(context) || !write_discovery(context)) return false;
+  const bool output_ready = fflush(context->output) == 0 && !ferror(context->output);
+  const bool errors_ready = fflush(context->errors) == 0 && !ferror(context->errors);
+  return output_ready && errors_ready;
+}
+
+static int finish_run(TlContext *context, int findings) {
+  const bool cache_ready = tl_cache_set_trim(&context->caches);
+  const bool output_ready = write_scan_output(context);
+  const bool failed = findings < 0 || context->graph_failed || !cache_ready || !output_ready;
+  tl_cache_set_free(&context->caches);
+  tl_graph_free(&context->graph);
+  if (failed) return 2;
   return findings == 0 ? 0 : 1;
+}
+
+int tl_run(const TlRunOptions *options, FILE *output, FILE *errors) {
+  if (!valid_options(options) || !output || !errors) return 2;
+  TlContext context = make_context(options, output, errors);
+  if (!set_scan_root(&context, options->root)) return 2;
+  if (writes_check_json(&context)) fputs("{\n  \"findings\": [\n", output);
+  const int findings = scan_tree(&context);
+  if (writes_check_json(&context)) fputs("\n  ]\n}\n", output);
+  return finish_run(&context, findings);
+}
+
+int tl_check(const TlCheckOptions *options, FILE *output, FILE *errors) {
+  if (!options) return 2;
+  const TlRunOptions run = {options->root, TL_COMMAND_CHECK, options->format, options->strict};
+  return tl_run(&run, output, errors);
 }

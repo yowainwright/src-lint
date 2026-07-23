@@ -1,0 +1,2 @@
+[boundaries.billing]
+public = ["proto/**"]

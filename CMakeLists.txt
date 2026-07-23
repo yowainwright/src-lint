@@ -12,7 +12,8 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-add_library(tree_legibility_core src/check.c)
+add_library(tree_legibility_core src/cache.c src/check.c src/config.c src/graph.c src/graph_html.c
+                                 src/imports.c)
 target_include_directories(tree_legibility_core PUBLIC include)
 target_compile_definitions(tree_legibility_core PRIVATE _DEFAULT_SOURCE _XOPEN_SOURCE=700)
 
@@ -29,7 +30,7 @@ if(TREE_LEGIBILITY_SANITIZERS)
   set(SANITIZER_FLAGS -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_compile_options(tree_legibility_core PRIVATE ${SANITIZER_FLAGS})
   target_compile_options(tree-legibility PRIVATE ${SANITIZER_FLAGS})
-  target_link_options(tree-legibility PRIVATE -fsanitize=address,undefined)
+  target_link_options(tree_legibility_core INTERFACE -fsanitize=address,undefined)
 endif()
 
 include(CTest)
