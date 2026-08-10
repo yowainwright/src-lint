@@ -119,7 +119,7 @@ static void hash_string(uint64_t *hash, const char *value) {
 static uint64_t cache_key(const TlCache *cache, const char *path, const char *content) {
   uint64_t hash = UINT64_C(1469598103934665603);
   const char *tool_version = "tree-legibility-0.1.0";
-  const char *parser_version = "lexical-adapters-v1";
+  const char *parser_version = "lexical-adapters-v2";
   const char *cache_version = "cache-v1";
   hash_string(&hash, tool_version);
   hash_string(&hash, parser_version);
@@ -157,8 +157,7 @@ static bool add_cache_entry(TlCacheEntries *entries, const char *path, const str
   strcpy(entry->path, path);
   entry->size = (size_t)info->st_size;
 #if defined(__APPLE__)
-  entry->modified.tv_sec = info->st_mtime;
-  entry->modified.tv_nsec = info->st_mtimensec;
+  entry->modified = info->st_mtimespec;
 #else
   entry->modified = info->st_mtim;
 #endif
@@ -416,7 +415,7 @@ static bool write_tracked_bytes(const TlCache *cache) {
 static bool mark_cache_dirty(const TlCache *cache) {
   char path[TL_PATH_CAPACITY];
   if (!control_path(cache, ".dirty", path)) return false;
-  const int descriptor = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  const int descriptor = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0666);
   if (descriptor < 0) return false;
   return close(descriptor) == 0;
 }

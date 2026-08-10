@@ -74,3 +74,45 @@ endif()
 if(EXISTS "${WORK_ROOT}/.tree-legibility/cache/.dirty")
   message(FATAL_ERROR "Cache transaction marker remained after a successful check")
 endif()
+
+set(protected_file "${WORK_ROOT}/protected.txt")
+set(dirty_marker "${WORK_ROOT}/.tree-legibility/cache/.dirty")
+file(WRITE "${protected_file}" "preserve me")
+file(CREATE_LINK "${protected_file}" "${dirty_marker}" SYMBOLIC RESULT link_result)
+if(NOT link_result STREQUAL "0")
+  message(FATAL_ERROR "Could not create cache-marker symlink: ${link_result}")
+endif()
+
+execute_process(
+  COMMAND "${CLI}" check "${WORK_ROOT}" --format json
+  RESULT_VARIABLE symlink_result
+  ERROR_VARIABLE symlink_errors
+)
+
+file(READ "${protected_file}" protected_content)
+if(NOT symlink_result EQUAL 0)
+  message(FATAL_ERROR "Check failed with a symlinked cache marker\n${symlink_errors}")
+endif()
+if(NOT protected_content STREQUAL "preserve me")
+  message(FATAL_ERROR "Symlinked cache marker modified its target")
+endif()
+
+file(REMOVE "${dirty_marker}")
+set(missing_target "${WORK_ROOT}/missing-target.txt")
+file(CREATE_LINK "${missing_target}" "${dirty_marker}" SYMBOLIC RESULT dangling_link_result)
+if(NOT dangling_link_result STREQUAL "0")
+  message(FATAL_ERROR "Could not create dangling cache-marker symlink: ${dangling_link_result}")
+endif()
+
+execute_process(
+  COMMAND "${CLI}" check "${WORK_ROOT}" --format json
+  RESULT_VARIABLE dangling_result
+  ERROR_VARIABLE dangling_errors
+)
+
+if(NOT dangling_result EQUAL 0)
+  message(FATAL_ERROR "Check failed with a dangling cache-marker symlink\n${dangling_errors}")
+endif()
+if(EXISTS "${missing_target}")
+  message(FATAL_ERROR "Symlinked cache marker created its target")
+endif()

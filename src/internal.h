@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #define TL_PATH_CAPACITY 4096
+#define TL_OWNER_CAPACITY 128
 
 typedef enum {
   TL_LANGUAGE_JAVASCRIPT,

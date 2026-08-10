@@ -98,6 +98,16 @@ add_test(
 )
 
 add_test(
+  NAME javascript_cooked_module_literals
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/javascript-cooked
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/javascript_cooked.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/service_boundary_json.cmake
+)
+
+add_test(
   NAME javascript_spacing
   COMMAND
     ${CMAKE_COMMAND}
@@ -219,6 +229,16 @@ add_test(
 )
 
 add_test(
+  NAME python_import_lists_and_strings
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/python-lexical
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/python_lexical.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/service_boundary_json.cmake
+)
+
+add_test(
   NAME go_single_import
   COMMAND
     ${CMAKE_COMMAND}
@@ -249,6 +269,16 @@ add_test(
 )
 
 add_test(
+  NAME go_and_proto_block_comments
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/polyglot-block-comments
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/empty.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/clean_json.cmake
+)
+
+add_test(
   NAME toml_boundary_config
   COMMAND
     ${CMAKE_COMMAND}
@@ -256,6 +286,16 @@ add_test(
     -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-toml
     -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/config_toml.json
     -P ${CMAKE_CURRENT_SOURCE_DIR}/service_boundary_json.cmake
+)
+
+add_test(
+  NAME go_public_package_root
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-go-public-root
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/empty.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/clean_json.cmake
 )
 
 add_test(
@@ -353,6 +393,26 @@ add_test(
     ${CMAKE_COMMAND}
     -DCLI=$<TARGET_FILE:tree-legibility>
     -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-invalid-root
+    -DEXPECTED_ERROR=invalid merged boundary configuration
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/invalid_config.cmake
+)
+
+add_test(
+  NAME invalid_config_without_sources
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-invalid-no-source
+    -DEXPECTED_ERROR=invalid TOML configuration
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/invalid_config.cmake
+)
+
+add_test(
+  NAME oversized_boundary_name
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-invalid-name
     -DEXPECTED_ERROR=invalid merged boundary configuration
     -P ${CMAKE_CURRENT_SOURCE_DIR}/invalid_config.cmake
 )

@@ -16,6 +16,9 @@ add_library(tree_legibility_core src/cache.c src/check.c src/config.c src/graph.
                                  src/imports.c)
 target_include_directories(tree_legibility_core PUBLIC include)
 target_compile_definitions(tree_legibility_core PRIVATE _DEFAULT_SOURCE _XOPEN_SOURCE=700)
+if(APPLE)
+  target_compile_definitions(tree_legibility_core PRIVATE _DARWIN_C_SOURCE)
+endif()
 
 add_executable(tree-legibility src/main.c)
 target_link_libraries(tree-legibility PRIVATE tree_legibility_core)

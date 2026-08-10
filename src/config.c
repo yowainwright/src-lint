@@ -924,7 +924,8 @@ static bool duplicate_boundary_root(const TlConfig *config, size_t index) {
 static bool valid_boundaries(const TlConfig *config) {
   for (size_t index = 0; index < config->boundary_count; index += 1) {
     const TlBoundaryConfig *boundary = &config->boundaries[index];
-    if (!boundary->name[0] || !boundary->root_set) return false;
+    const bool valid_name = boundary->name[0] && strlen(boundary->name) < TL_OWNER_CAPACITY;
+    if (!valid_name || !boundary->root_set) return false;
     if (!valid_boundary_root(boundary->root) || duplicate_boundary_root(config, index))
       return false;
   }
@@ -1004,6 +1005,7 @@ static bool match_single_star(const char *pattern, const char *value) {
 
 static bool glob_match(const char *pattern, const char *value) {
   if (*pattern == '\0') return *value == '\0';
+  if (*value == '\0' && strcmp(pattern, "/**") == 0) return true;
   if (pattern[0] == '*' && pattern[1] == '*') return match_double_star(pattern, value);
   if (*pattern == '*') return match_single_star(pattern, value);
   return *value && *pattern == *value && glob_match(pattern + 1, value + 1);

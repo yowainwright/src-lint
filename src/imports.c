@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -152,11 +153,24 @@ static bool next_js_token(TlJsScanner *scanner, TlToken *token) {
   return false;
 }
 
-static bool read_quoted_import(char *cursor, TlImportEdge *edge) {
+static bool has_template_substitution(const char *start, const char *end) {
+  for (const char *cursor = start; cursor < end; cursor += 1) {
+    if (*cursor == '\\' && cursor + 1 < end) {
+      cursor += 1;
+      continue;
+    }
+    if (*cursor == '$' && cursor + 1 < end && cursor[1] == '{') return true;
+  }
+  return false;
+}
+
+static bool read_module_literal(char *cursor, bool allow_template, TlImportEdge *edge) {
   cursor = skip_js_trivia(cursor);
-  if (*cursor != '\'' && *cursor != '"') return false;
+  const bool quoted = *cursor == '\'' || *cursor == '"';
+  if (!quoted && (!allow_template || *cursor != '`')) return false;
   char *end = quoted_end(cursor);
   if (!end) return false;
+  if (*cursor == '`' && has_template_substitution(cursor + 1, end)) return false;
   edge->specifier = cursor + 1;
   edge->end = end;
   return true;
@@ -165,13 +179,13 @@ static bool read_quoted_import(char *cursor, TlImportEdge *edge) {
 static bool read_call_import(TlJsScanner *scanner, TlImportEdge *edge) {
   char *cursor = skip_js_trivia(scanner->cursor);
   if (*cursor != '(') return false;
-  if (!read_quoted_import(cursor + 1, edge)) return false;
+  if (!read_module_literal(cursor + 1, true, edge)) return false;
   scanner->cursor = edge->end + 1;
   return true;
 }
 
 static bool read_direct_import(TlJsScanner *scanner, TlImportEdge *edge) {
-  if (!read_quoted_import(scanner->cursor, edge)) return false;
+  if (!read_module_literal(scanner->cursor, false, edge)) return false;
   scanner->cursor = edge->end + 1;
   return true;
 }
@@ -234,12 +248,138 @@ static void advance_position(char **cursor, const char *target, size_t *line, si
   }
 }
 
+static int hexadecimal_digit(char character) {
+  if (character >= '0' && character <= '9') return character - '0';
+  if (character >= 'a' && character <= 'f') return character - 'a' + 10;
+  if (character >= 'A' && character <= 'F') return character - 'A' + 10;
+  return -1;
+}
+
+static bool read_hexadecimal(const char **cursor, const char *end, size_t digits, uint32_t *value) {
+  if ((size_t)(end - *cursor) < digits) return false;
+  *value = 0;
+  for (size_t index = 0; index < digits; index += 1) {
+    const int digit = hexadecimal_digit((*cursor)[index]);
+    if (digit < 0) return false;
+    *value = (*value << 4) | (uint32_t)digit;
+  }
+  *cursor += digits;
+  return true;
+}
+
+static bool read_braced_unicode(const char **cursor, const char *end, uint32_t *value) {
+  *value = 0;
+  size_t digits = 0;
+  while (*cursor < end && **cursor != '}') {
+    const int digit = hexadecimal_digit(**cursor);
+    if (digit < 0 || digits == 6) return false;
+    *value = (*value << 4) | (uint32_t)digit;
+    *cursor += 1;
+    digits += 1;
+  }
+  if (digits == 0 || *cursor == end || **cursor != '}') return false;
+  *cursor += 1;
+  return *value <= 0x10ffff;
+}
+
+static bool read_unicode_escape(const char **cursor, const char *end, uint32_t *value) {
+  if (**cursor != '{') return read_hexadecimal(cursor, end, 4, value);
+  *cursor += 1;
+  return read_braced_unicode(cursor, end, value);
+}
+
+static void append_two_byte_utf8(char **output, uint32_t value) {
+  *(*output)++ = (char)(0xc0 | (value >> 6));
+  *(*output)++ = (char)(0x80 | (value & 0x3f));
+}
+
+static void append_three_byte_utf8(char **output, uint32_t value) {
+  *(*output)++ = (char)(0xe0 | (value >> 12));
+  *(*output)++ = (char)(0x80 | ((value >> 6) & 0x3f));
+  *(*output)++ = (char)(0x80 | (value & 0x3f));
+}
+
+static void append_four_byte_utf8(char **output, uint32_t value) {
+  *(*output)++ = (char)(0xf0 | (value >> 18));
+  *(*output)++ = (char)(0x80 | ((value >> 12) & 0x3f));
+  *(*output)++ = (char)(0x80 | ((value >> 6) & 0x3f));
+  *(*output)++ = (char)(0x80 | (value & 0x3f));
+}
+
+static bool append_utf8(char **output, uint32_t value) {
+  if (value == 0 || value > 0x10ffff) return false;
+  if (value <= 0x7f) {
+    *(*output)++ = (char)value;
+    return true;
+  }
+  if (value <= 0x7ff) {
+    append_two_byte_utf8(output, value);
+    return true;
+  }
+  if (value >= 0xd800 && value <= 0xdfff) return false;
+  if (value <= 0xffff) {
+    append_three_byte_utf8(output, value);
+    return true;
+  }
+  append_four_byte_utf8(output, value);
+  return true;
+}
+
+static char simple_escape(char character) {
+  if (character == 'b') return '\b';
+  if (character == 'f') return '\f';
+  if (character == 'n') return '\n';
+  if (character == 'r') return '\r';
+  if (character == 't') return '\t';
+  if (character == 'v') return '\v';
+  return character;
+}
+
+static void skip_optional_line_feed(const char **cursor, const char *end) {
+  if (*cursor < end && **cursor == '\n') *cursor += 1;
+}
+
+static bool decode_js_escape(const char **cursor, const char *end, char **output) {
+  if (*cursor == end) return false;
+  const char escaped = *(*cursor)++;
+  if (escaped == '\n') return true;
+  if (escaped == '\r') {
+    skip_optional_line_feed(cursor, end);
+    return true;
+  }
+  uint32_t value;
+  if (escaped == 'x') return read_hexadecimal(cursor, end, 2, &value) && append_utf8(output, value);
+  if (escaped == 'u') return read_unicode_escape(cursor, end, &value) && append_utf8(output, value);
+  if (escaped == '0') return false;
+  *(*output)++ = simple_escape(escaped);
+  return true;
+}
+
+static char *decode_js_literal(const TlImportEdge *edge) {
+  const size_t length = (size_t)(edge->end - edge->specifier);
+  char *decoded = malloc(length + 1);
+  if (!decoded) return NULL;
+  const char *cursor = edge->specifier;
+  char *output = decoded;
+  while (cursor < edge->end) {
+    if (*cursor != '\\') {
+      *output++ = *cursor++;
+      continue;
+    }
+    cursor += 1;
+    if (decode_js_escape(&cursor, edge->end, &output)) continue;
+    free(decoded);
+    return NULL;
+  }
+  *output = '\0';
+  return decoded;
+}
+
 static bool add_js_import(TlImportList *list, TlImportEdge *edge, size_t line, size_t column) {
-  const char saved = *edge->end;
-  *edge->end = '\0';
-  const bool added =
-      tl_import_list_add(list, edge->specifier, line, column, TL_LANGUAGE_JAVASCRIPT);
-  *edge->end = saved;
+  char *specifier = decode_js_literal(edge);
+  if (!specifier) return false;
+  const bool added = tl_import_list_add(list, specifier, line, column, TL_LANGUAGE_JAVASCRIPT);
+  free(specifier);
   return added;
 }
 
@@ -318,20 +458,39 @@ static bool add_python_from(char *line, size_t line_number, TlImportList *list) 
   return converted && tl_import_list_add(list, specifier, line_number, column, TL_LANGUAGE_PYTHON);
 }
 
+static bool add_python_module(char *line, char *module, char *end, size_t line_number,
+                              TlImportList *list) {
+  const char saved = *end;
+  *end = '\0';
+  char specifier[TL_PATH_CAPACITY];
+  const bool converted = python_specifier(module, specifier);
+  *end = saved;
+  const size_t column = (size_t)(module - line) + 1;
+  return converted && tl_import_list_add(list, specifier, line_number, column, TL_LANGUAGE_PYTHON);
+}
+
+static char *skip_python_alias(char *cursor) {
+  cursor = skip_horizontal_space(cursor);
+  if (!python_keyword(cursor, "as")) return cursor;
+  cursor = skip_horizontal_space(cursor + strlen("as"));
+  while (python_identifier_part(*cursor)) cursor += 1;
+  return skip_horizontal_space(cursor);
+}
+
 static bool add_python_import(char *line, size_t line_number, TlImportList *list) {
   char *cursor = skip_horizontal_space(line);
   if (!python_keyword(cursor, "import")) return true;
   cursor = skip_horizontal_space(cursor + strlen("import"));
-  char *module = cursor;
-  while (python_identifier_part(*cursor) || *cursor == '.') cursor += 1;
-  if (cursor == module) return true;
-  const char saved = *cursor;
-  *cursor = '\0';
-  char specifier[TL_PATH_CAPACITY];
-  const bool converted = python_specifier(module, specifier);
-  *cursor = saved;
-  const size_t column = (size_t)(module - line) + 1;
-  return converted && tl_import_list_add(list, specifier, line_number, column, TL_LANGUAGE_PYTHON);
+  while (*cursor) {
+    char *module = cursor;
+    while (python_identifier_part(*cursor) || *cursor == '.') cursor += 1;
+    if (cursor == module) return true;
+    if (!add_python_module(line, module, cursor, line_number, list)) return false;
+    cursor = skip_python_alias(cursor);
+    if (*cursor != ',') return true;
+    cursor = skip_horizontal_space(cursor + 1);
+  }
+  return true;
 }
 
 static bool parse_python_line(char *line, size_t line_number, TlImportList *list) {
@@ -339,19 +498,134 @@ static bool parse_python_line(char *line, size_t line_number, TlImportList *list
   return add_python_import(line, line_number, list);
 }
 
+typedef struct {
+  char triple_quote;
+} TlPythonState;
+
+static bool python_quote_character(char character) { return character == '\'' || character == '"'; }
+
+static bool python_triple_quote(const char *cursor) {
+  return python_quote_character(*cursor) && cursor[1] == *cursor && cursor[2] == *cursor;
+}
+
+static char *mask_python_escape(char *cursor) {
+  *cursor++ = ' ';
+  if (*cursor) *cursor++ = ' ';
+  return cursor;
+}
+
+static char *mask_python_triple(char *cursor, TlPythonState *state) {
+  while (*cursor) {
+    if (*cursor == '\\') {
+      cursor = mask_python_escape(cursor);
+      continue;
+    }
+    const bool closes = cursor[0] == state->triple_quote && cursor[1] == state->triple_quote &&
+                        cursor[2] == state->triple_quote;
+    if (closes) {
+      memset(cursor, ' ', 3);
+      state->triple_quote = '\0';
+      return cursor + 3;
+    }
+    *cursor++ = ' ';
+  }
+  return cursor;
+}
+
+static char *mask_python_quoted(char *cursor) {
+  const char quote = *cursor;
+  *cursor++ = ' ';
+  while (*cursor) {
+    if (*cursor == '\\') {
+      cursor = mask_python_escape(cursor);
+      continue;
+    }
+    const bool closes = *cursor == quote;
+    *cursor++ = ' ';
+    if (closes) return cursor;
+  }
+  return cursor;
+}
+
+static void mask_python_line(char *line, TlPythonState *state) {
+  char *cursor = line;
+  while (*cursor) {
+    if (state->triple_quote) {
+      cursor = mask_python_triple(cursor, state);
+      continue;
+    }
+    if (*cursor == '#') {
+      memset(cursor, ' ', strlen(cursor));
+      return;
+    }
+    if (!python_quote_character(*cursor)) {
+      cursor += 1;
+      continue;
+    }
+    if (!python_triple_quote(cursor)) {
+      cursor = mask_python_quoted(cursor);
+      continue;
+    }
+    state->triple_quote = *cursor;
+    memset(cursor, ' ', 3);
+    cursor += 3;
+  }
+}
+
 static bool parse_python(char *content, TlImportList *list) {
-  char *line = content;
+  char *code = duplicate_string(content);
+  if (!code) return false;
+  char *line = code;
   size_t line_number = 1;
+  bool parsed = true;
+  TlPythonState state = {0};
   while (*line) {
     char *next = strchr(line, '\n');
     if (next) *next = '\0';
-    const bool added = parse_python_line(line, line_number, list);
-    if (next) *next = '\n';
-    if (!added || !next) return added;
+    mask_python_line(line, &state);
+    parsed = parse_python_line(line, line_number, list);
+    if (!parsed || !next) break;
     line = next + 1;
     line_number += 1;
   }
-  return true;
+  free(code);
+  return parsed;
+}
+
+static char *mask_c_block_comment(char *cursor, bool *block_comment) {
+  while (*cursor) {
+    const bool closes = cursor[0] == '*' && cursor[1] == '/';
+    if (closes) {
+      cursor[0] = ' ';
+      cursor[1] = ' ';
+      *block_comment = false;
+      return cursor + 2;
+    }
+    *cursor++ = ' ';
+  }
+  return cursor;
+}
+
+static void mask_c_comments(char *line, bool *block_comment) {
+  char *cursor = line;
+  while (*cursor) {
+    if (*block_comment) {
+      cursor = mask_c_block_comment(cursor, block_comment);
+      continue;
+    }
+    if (line_comment_start(cursor)) {
+      memset(cursor, ' ', strlen(cursor));
+      return;
+    }
+    if (block_comment_start(cursor)) {
+      cursor[0] = ' ';
+      cursor[1] = ' ';
+      *block_comment = true;
+      cursor += 2;
+      continue;
+    }
+    cursor = quote_character(*cursor) ? skip_quoted(cursor) : cursor + 1;
+  }
 }
 
 static char *find_import_quote(char *cursor) {
@@ -392,19 +666,24 @@ static bool parse_go_line(char *line, size_t line_number, bool *block, TlImportL
 }
 
 static bool parse_go(char *content, TlImportList *list) {
-  char *line = content;
+  char *code = duplicate_string(content);
+  if (!code) return false;
+  char *line = code;
   size_t line_number = 1;
   bool block = false;
+  bool block_comment = false;
+  bool parsed = true;
   while (*line) {
     char *next = strchr(line, '\n');
     if (next) *next = '\0';
-    const bool added = parse_go_line(line, line_number, &block, list);
-    if (next) *next = '\n';
-    if (!added || !next) return added;
+    mask_c_comments(line, &block_comment);
+    parsed = parse_go_line(line, line_number, &block, list);
+    if (!parsed || !next) break;
     line = next + 1;
     line_number += 1;
   }
-  return true;
+  free(code);
+  return parsed;
 }
 
 static char *skip_proto_modifier(char *cursor) {
@@ -422,18 +701,23 @@ static bool parse_proto_line(char *line, size_t line_number, TlImportList *list)
 }
 
 static bool parse_proto(char *content, TlImportList *list) {
-  char *line = content;
+  char *code = duplicate_string(content);
+  if (!code) return false;
+  char *line = code;
   size_t line_number = 1;
+  bool block_comment = false;
+  bool parsed = true;
   while (*line) {
     char *next = strchr(line, '\n');
     if (next) *next = '\0';
-    const bool added = parse_proto_line(line, line_number, list);
-    if (next) *next = '\n';
-    if (!added || !next) return added;
+    mask_c_comments(line, &block_comment);
+    parsed = parse_proto_line(line, line_number, list);
+    if (!parsed || !next) break;
     line = next + 1;
     line_number += 1;
   }
-  return true;
+  free(code);
+  return parsed;
 }
 
 static bool path_has_extension(const char *path, const char *extension) {

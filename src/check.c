@@ -25,7 +25,7 @@ typedef struct {
 } TlContext;
 
 typedef struct {
-  char name[128];
+  char name[TL_OWNER_CAPACITY];
   const char *inside;
 } TlOwner;
 
@@ -766,6 +766,20 @@ static bool entry_error(const FTSENT *entry) {
   return entry->fts_info == FTS_ERR || entry->fts_info == FTS_DNR || entry->fts_info == FTS_NS;
 }
 
+static bool config_file_name(const char *name) {
+  return strcmp(name, ".tree-legibilityrc.toml") == 0 ||
+         strcmp(name, ".tree-legibilityrc.json") == 0 ||
+         strcmp(name, ".tree-legibilityrc.yaml") == 0 ||
+         strcmp(name, ".tree-legibilityrc.yml") == 0;
+}
+
+static bool validate_config_entry(TlContext *context, const char *path) {
+  TlConfig config;
+  if (!tl_config_load_for_file(path, &config, context->errors)) return false;
+  tl_config_free(&config);
+  return true;
+}
+
 static bool skip_entry(FTS *tree, FTSENT *entry) {
   const bool is_directory = entry->fts_info == FTS_D && entry->fts_level > 0;
   if (!is_directory || !ignored_directory(entry->fts_name)) return false;
@@ -779,6 +793,9 @@ static int scan_entry(TlContext *context, FTSENT *entry) {
     return -1;
   }
   if (entry->fts_info != FTS_F) return 0;
+  if (config_file_name(entry->fts_name)) {
+    return validate_config_entry(context, entry->fts_path) ? 0 : -1;
+  }
   if (!has_source_extension(entry->fts_path)) return 0;
   return scan_file(context, entry->fts_path);
 }
