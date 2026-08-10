@@ -275,11 +275,34 @@ static bool resolve_suffixes(char *path, const char *const *suffixes, size_t cou
   return false;
 }
 
+static bool replace_javascript_suffix(char *path, const char *from, const char *to) {
+  const size_t path_length = strlen(path);
+  const size_t from_length = strlen(from);
+  const size_t to_length = strlen(to);
+  if (path_length < from_length || strcmp(path + path_length - from_length, from) != 0)
+    return false;
+  if (path_length - from_length + to_length >= TL_PATH_CAPACITY) return false;
+  char candidate[TL_PATH_CAPACITY];
+  memcpy(candidate, path, path_length - from_length);
+  strcpy(candidate + path_length - from_length, to);
+  if (repository_path_kind(candidate) != TL_PATH_FILE) return false;
+  strcpy(path, candidate);
+  return true;
+}
+
+static bool resolve_typescript_runtime_path(char *path) {
+  if (replace_javascript_suffix(path, ".js", ".ts")) return true;
+  if (replace_javascript_suffix(path, ".js", ".tsx")) return true;
+  if (replace_javascript_suffix(path, ".mjs", ".mts")) return true;
+  return replace_javascript_suffix(path, ".cjs", ".cts");
+}
+
 static bool resolve_javascript_path(char *path, TlPathKind kind) {
   static const char *const extensions[] = {".ts", ".tsx", ".mts", ".cts",
                                            ".js", ".jsx", ".mjs", ".cjs"};
   static const char *const indexes[] = {"/index.ts", "/index.tsx", "/index.mts", "/index.cts",
                                         "/index.js", "/index.jsx", "/index.mjs", "/index.cjs"};
+  if (kind == TL_PATH_MISSING && resolve_typescript_runtime_path(path)) return true;
   if (kind != TL_PATH_DIRECTORY) {
     return resolve_suffixes(path, extensions, sizeof(extensions) / sizeof(*extensions));
   }
@@ -299,6 +322,18 @@ static bool resolve_repository_path(char *path, TlLanguage language) {
   if (language == TL_LANGUAGE_JAVASCRIPT) return resolve_javascript_path(path, kind);
   if (language == TL_LANGUAGE_PYTHON) return resolve_python_path(path, kind);
   return kind == TL_PATH_DIRECTORY;
+}
+
+static bool canonicalize_repository_path(char *path) {
+  char absolute[TL_PATH_CAPACITY];
+  const int written = snprintf(absolute, sizeof(absolute), "/%s", path);
+  if (written < 0 || (size_t)written >= sizeof(absolute)) return false;
+  char canonical[TL_PATH_CAPACITY];
+  if (!realpath(absolute, canonical)) return false;
+  const char *relative = canonical[0] == '/' ? canonical + 1 : canonical;
+  if (strlen(relative) >= TL_PATH_CAPACITY) return false;
+  strcpy(path, relative);
+  return true;
 }
 
 static bool build_services_target(const char *source, const char *segment, const char *specifier,
@@ -697,7 +732,8 @@ static int evaluate_import(TlContext *context, const TlConfig *config, const cha
                            const TlImport *import) {
   char target[TL_PATH_CAPACITY];
   if (!resolve_import_target(context, config, source, import, target)) return 0;
-  const bool resolved = resolve_repository_path(target, import->language);
+  const bool found = resolve_repository_path(target, import->language);
+  const bool resolved = found && canonicalize_repository_path(target);
   TlEdgePolicy policy;
   classify_policy(context, config, source, target, &policy);
   if (policy.violation)

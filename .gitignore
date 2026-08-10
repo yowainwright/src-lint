@@ -81,6 +81,9 @@ dkms.conf
 # Repository-local analysis cache
 **/.tree-legibility/cache/
 
+# Clang static analyzer output
+/*.plist
+
 # Operating system files
 .DS_Store
 

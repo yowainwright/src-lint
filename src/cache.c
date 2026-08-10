@@ -119,7 +119,7 @@ static void hash_string(uint64_t *hash, const char *value) {
 static uint64_t cache_key(const TlCache *cache, const char *path, const char *content) {
   uint64_t hash = UINT64_C(1469598103934665603);
   const char *tool_version = "tree-legibility-0.1.0";
-  const char *parser_version = "lexical-adapters-v2";
+  const char *parser_version = "lexical-adapters-v3";
   const char *cache_version = "cache-v1";
   hash_string(&hash, tool_version);
   hash_string(&hash, parser_version);

@@ -18,6 +18,7 @@ typedef struct {
   char *source_start;
   char *cursor;
   bool expect_from;
+  bool regex_allowed;
 } TlJsScanner;
 
 static char *duplicate_string(const char *value) {
@@ -107,6 +108,28 @@ static char *skip_line_comment(char *cursor) {
   return end ? end + 1 : cursor + strlen(cursor);
 }
 
+static char *skip_regex_flags(char *cursor) {
+  cursor += 1;
+  while (identifier_part(*cursor)) cursor += 1;
+  return cursor;
+}
+
+static char *regex_literal_end(char *cursor) {
+  bool character_class = false;
+  cursor += 1;
+  while (*cursor && *cursor != '\n' && *cursor != '\r') {
+    if (*cursor == '\\' && cursor[1]) {
+      cursor += 2;
+      continue;
+    }
+    if (*cursor == '[') character_class = true;
+    if (*cursor == ']') character_class = false;
+    if (*cursor == '/' && !character_class) return skip_regex_flags(cursor);
+    cursor += 1;
+  }
+  return NULL;
+}
+
 static char *skip_js_trivia(char *cursor) {
   while (*cursor) {
     cursor = skip_space(cursor);
@@ -129,6 +152,15 @@ static bool read_identifier(TlJsScanner *scanner, TlToken *token) {
   return true;
 }
 
+static bool skip_js_regex(TlJsScanner *scanner) {
+  if (*scanner->cursor != '/' || !scanner->regex_allowed) return false;
+  char *end = regex_literal_end(scanner->cursor);
+  if (!end) return false;
+  scanner->cursor = end;
+  scanner->regex_allowed = false;
+  return true;
+}
+
 static bool skip_js_ignored(TlJsScanner *scanner) {
   if (line_comment_start(scanner->cursor)) {
     scanner->cursor = skip_line_comment(scanner->cursor);
@@ -138,17 +170,56 @@ static bool skip_js_ignored(TlJsScanner *scanner) {
     scanner->cursor = skip_block_comment(scanner->cursor);
     return true;
   }
+  if (skip_js_regex(scanner)) return true;
   if (!quote_character(*scanner->cursor)) return false;
   scanner->cursor = skip_quoted(scanner->cursor);
+  scanner->regex_allowed = false;
   return true;
+}
+
+static bool regex_prefix_token(const TlToken *token) {
+  return token_is(token, "await") || token_is(token, "case") || token_is(token, "delete") ||
+         token_is(token, "do") || token_is(token, "else") || token_is(token, "in") ||
+         token_is(token, "instanceof") || token_is(token, "new") || token_is(token, "of") ||
+         token_is(token, "return") || token_is(token, "throw") || token_is(token, "typeof") ||
+         token_is(token, "void") || token_is(token, "yield");
+}
+
+static bool read_js_token(TlJsScanner *scanner, TlToken *token) {
+  if (!read_identifier(scanner, token)) return false;
+  scanner->regex_allowed = regex_prefix_token(token);
+  return true;
+}
+
+static bool js_whitespace(char character) {
+  return character == ' ' || character == '\t' || character == '\r' || character == '\n';
+}
+
+static bool closing_js_token(char character) {
+  return character == ')' || character == ']' || character == '}' || character == '.';
+}
+
+static void advance_js_character(TlJsScanner *scanner) {
+  const char character = *scanner->cursor;
+  if (js_whitespace(character)) {
+    scanner->cursor += 1;
+    return;
+  }
+  if (character >= '0' && character <= '9') {
+    while (identifier_part(*scanner->cursor)) scanner->cursor += 1;
+    scanner->regex_allowed = false;
+    return;
+  }
+  if (character == ';') scanner->expect_from = false;
+  scanner->regex_allowed = !closing_js_token(character);
+  scanner->cursor += 1;
 }
 
 static bool next_js_token(TlJsScanner *scanner, TlToken *token) {
   while (*scanner->cursor) {
     if (skip_js_ignored(scanner)) continue;
-    if (read_identifier(scanner, token)) return true;
-    if (*scanner->cursor == ';') scanner->expect_from = false;
-    scanner->cursor += 1;
+    if (read_js_token(scanner, token)) return true;
+    advance_js_character(scanner);
   }
   return false;
 }
@@ -384,7 +455,7 @@ static bool add_js_import(TlImportList *list, TlImportEdge *edge, size_t line, s
 }
 
 static bool parse_javascript(char *content, TlImportList *list) {
-  TlJsScanner scanner = {content, content, false};
+  TlJsScanner scanner = {content, content, false, true};
   char *position = content;
   size_t line = 1;
   size_t column = 1;
@@ -441,8 +512,8 @@ static bool python_specifier(const char *module, char *output) {
   return true;
 }
 
-static bool add_python_from(char *line, size_t line_number, TlImportList *list) {
-  char *cursor = skip_horizontal_space(line);
+static bool add_python_from(char *line, char *statement, size_t line_number, TlImportList *list) {
+  char *cursor = skip_horizontal_space(statement);
   if (!python_keyword(cursor, "from")) return true;
   cursor = skip_horizontal_space(cursor + strlen("from"));
   char *module = cursor;
@@ -477,8 +548,8 @@ static char *skip_python_alias(char *cursor) {
   return skip_horizontal_space(cursor);
 }
 
-static bool add_python_import(char *line, size_t line_number, TlImportList *list) {
-  char *cursor = skip_horizontal_space(line);
+static bool add_python_import(char *line, char *statement, size_t line_number, TlImportList *list) {
+  char *cursor = skip_horizontal_space(statement);
   if (!python_keyword(cursor, "import")) return true;
   cursor = skip_horizontal_space(cursor + strlen("import"));
   while (*cursor) {
@@ -493,9 +564,23 @@ static bool add_python_import(char *line, size_t line_number, TlImportList *list
   return true;
 }
 
+static bool parse_python_statement(char *line, char *statement, size_t line_number,
+                                   TlImportList *list) {
+  if (!add_python_from(line, statement, line_number, list)) return false;
+  return add_python_import(line, statement, line_number, list);
+}
+
 static bool parse_python_line(char *line, size_t line_number, TlImportList *list) {
-  if (!add_python_from(line, line_number, list)) return false;
-  return add_python_import(line, line_number, list);
+  char *statement = line;
+  while (*statement) {
+    char *separator = strchr(statement, ';');
+    if (separator) *separator = '\0';
+    const bool parsed = parse_python_statement(line, statement, line_number, list);
+    if (separator) *separator = ';';
+    if (!parsed || !separator) return parsed;
+    statement = separator + 1;
+  }
+  return true;
 }
 
 typedef struct {
@@ -592,13 +677,18 @@ static bool parse_python(char *content, TlImportList *list) {
   return parsed;
 }
 
-static char *mask_c_block_comment(char *cursor, bool *block_comment) {
+typedef struct {
+  bool block_comment;
+  bool raw_string;
+} TlCState;
+
+static char *mask_c_block_comment(char *cursor, TlCState *state) {
   while (*cursor) {
     const bool closes = cursor[0] == '*' && cursor[1] == '/';
     if (closes) {
       cursor[0] = ' ';
       cursor[1] = ' ';
-      *block_comment = false;
+      state->block_comment = false;
       return cursor + 2;
     }
     *cursor++ = ' ';
@@ -606,11 +696,35 @@ static char *mask_c_block_comment(char *cursor, bool *block_comment) {
   return cursor;
 }
 
-static void mask_c_comments(char *line, bool *block_comment) {
+static char *mask_to_line_end(char *cursor) {
+  const size_t length = strlen(cursor);
+  memset(cursor, ' ', length);
+  return cursor + length;
+}
+
+static char *mask_go_raw_string(char *cursor, TlCState *state) {
+  char *end = strchr(cursor, '`');
+  if (!end) return mask_to_line_end(cursor);
+  memset(cursor, ' ', (size_t)(end - cursor) + 1);
+  state->raw_string = false;
+  return end + 1;
+}
+
+static bool start_go_raw_string(char *cursor, TlCState *state) {
+  if (*cursor != '`' || strchr(cursor + 1, '`')) return false;
+  state->raw_string = true;
+  return true;
+}
+
+static void mask_c_comments(char *line, TlCState *state, bool track_raw_strings) {
   char *cursor = line;
   while (*cursor) {
-    if (*block_comment) {
-      cursor = mask_c_block_comment(cursor, block_comment);
+    if (state->raw_string) {
+      cursor = mask_go_raw_string(cursor, state);
+      continue;
+    }
+    if (state->block_comment) {
+      cursor = mask_c_block_comment(cursor, state);
       continue;
     }
     if (line_comment_start(cursor)) {
@@ -620,10 +734,11 @@ static void mask_c_comments(char *line, bool *block_comment) {
     if (block_comment_start(cursor)) {
       cursor[0] = ' ';
       cursor[1] = ' ';
-      *block_comment = true;
+      state->block_comment = true;
       cursor += 2;
       continue;
     }
+    if (track_raw_strings && start_go_raw_string(cursor, state)) return;
     cursor = quote_character(*cursor) ? skip_quoted(cursor) : cursor + 1;
   }
 }
@@ -671,12 +786,12 @@ static bool parse_go(char *content, TlImportList *list) {
   char *line = code;
   size_t line_number = 1;
   bool block = false;
-  bool block_comment = false;
+  TlCState state = {0};
   bool parsed = true;
   while (*line) {
     char *next = strchr(line, '\n');
     if (next) *next = '\0';
-    mask_c_comments(line, &block_comment);
+    mask_c_comments(line, &state, true);
     parsed = parse_go_line(line, line_number, &block, list);
     if (!parsed || !next) break;
     line = next + 1;
@@ -705,12 +820,12 @@ static bool parse_proto(char *content, TlImportList *list) {
   if (!code) return false;
   char *line = code;
   size_t line_number = 1;
-  bool block_comment = false;
+  TlCState state = {0};
   bool parsed = true;
   while (*line) {
     char *next = strchr(line, '\n');
     if (next) *next = '\0';
-    mask_c_comments(line, &block_comment);
+    mask_c_comments(line, &state, false);
     parsed = parse_proto_line(line, line_number, list);
     if (!parsed || !next) break;
     line = next + 1;

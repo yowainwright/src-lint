@@ -88,6 +88,17 @@ add_test(
 )
 
 add_test(
+  NAME canonical_symlink_boundary
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DSOURCE_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/symlink-boundary
+    -DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/symlink-boundary-work
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/symlink_boundary.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/symlink_boundary.cmake
+)
+
+add_test(
   NAME javascript_module_syntax
   COMMAND
     ${CMAKE_COMMAND}
@@ -104,6 +115,16 @@ add_test(
     -DCLI=$<TARGET_FILE:tree-legibility>
     -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/javascript-cooked
     -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/javascript_cooked.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/service_boundary_json.cmake
+)
+
+add_test(
+  NAME ignores_javascript_regex_literals
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/javascript-regex
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/javascript_regex.json
     -P ${CMAKE_CURRENT_SOURCE_DIR}/service_boundary_json.cmake
 )
 
@@ -125,6 +146,18 @@ add_test(
     -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/extensionless
     -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/extensionless.json
     -P ${CMAKE_CURRENT_SOURCE_DIR}/service_boundary_json.cmake
+)
+
+add_test(
+  NAME typescript_runtime_specifiers
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/typescript-runtime-specifiers
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/empty.json
+    -DEXPECTED_EXIT=0
+    -DSTRICT=ON
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/finding_json.cmake
 )
 
 add_test(
@@ -239,6 +272,16 @@ add_test(
 )
 
 add_test(
+  NAME python_semicolon_import
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/python-semicolon
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/python_semicolon.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/service_boundary_json.cmake
+)
+
+add_test(
   NAME go_single_import
   COMMAND
     ${CMAKE_COMMAND}
@@ -274,6 +317,16 @@ add_test(
     ${CMAKE_COMMAND}
     -DCLI=$<TARGET_FILE:tree-legibility>
     -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/polyglot-block-comments
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/empty.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/clean_json.cmake
+)
+
+add_test(
+  NAME go_multiline_raw_string
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/go-raw-string
     -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/empty.json
     -P ${CMAKE_CURRENT_SOURCE_DIR}/clean_json.cmake
 )

@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "rule": "TL1001",
+      "source": "services/orders/create.ts",
+      "line": 1,
+      "column": 25,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/ledger.ts"
+    },
+    {
+      "rule": "TL1001",
+      "source": "services/orders/create.ts",
+      "line": 2,
+      "column": 32,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/ledger.ts"
+    }
+  ]
+}
