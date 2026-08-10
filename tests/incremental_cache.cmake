@@ -19,6 +19,7 @@ endif()
 if(NOT EXISTS "${WORK_ROOT}/.tree-legibility/cache/.size")
   message(FATAL_ERROR "Expected cache size metadata after initial check")
 endif()
+file(READ "${WORK_ROOT}/.tree-legibility/cache/.size" first_tracked_size)
 
 execute_process(
   COMMAND "${CLI}" check "${WORK_ROOT}" --format json
@@ -28,8 +29,12 @@ execute_process(
 
 file(GLOB warm_records "${WORK_ROOT}/.tree-legibility/cache/*.tlc")
 list(LENGTH warm_records warm_count)
+file(READ "${WORK_ROOT}/.tree-legibility/cache/.size" warm_tracked_size)
 if(NOT warm_result EQUAL 0 OR NOT warm_count EQUAL first_count)
   message(FATAL_ERROR "Warm check did not reuse cache\n${warm_errors}")
+endif()
+if(NOT warm_tracked_size STREQUAL first_tracked_size)
+  message(FATAL_ERROR "Warm cache changed tracked bytes")
 endif()
 
 file(APPEND "${WORK_ROOT}/services/orders/create.ts" "\n")
@@ -115,4 +120,52 @@ if(NOT dangling_result EQUAL 0)
 endif()
 if(EXISTS "${missing_target}")
   message(FATAL_ERROR "Symlinked cache marker created its target")
+endif()
+
+file(REMOVE_RECURSE "${WORK_ROOT}/.tree-legibility")
+set(external_parent "${WORK_ROOT}-external-parent")
+file(REMOVE_RECURSE "${external_parent}")
+file(MAKE_DIRECTORY "${external_parent}")
+file(CREATE_LINK "${external_parent}" "${WORK_ROOT}/.tree-legibility" SYMBOLIC
+     RESULT parent_link_result)
+if(NOT parent_link_result STREQUAL "0")
+  message(FATAL_ERROR "Could not create cache-parent symlink")
+endif()
+
+execute_process(
+  COMMAND "${CLI}" check "${WORK_ROOT}" --format json
+  RESULT_VARIABLE parent_result
+  ERROR_VARIABLE parent_errors
+)
+
+if(NOT parent_result EQUAL 0)
+  message(FATAL_ERROR "Check failed with symlinked cache parent\n${parent_errors}")
+endif()
+if(EXISTS "${external_parent}/cache")
+  message(FATAL_ERROR "Cache wrote through symlinked parent directory")
+endif()
+
+file(REMOVE "${WORK_ROOT}/.tree-legibility")
+file(MAKE_DIRECTORY "${WORK_ROOT}/.tree-legibility")
+set(external_cache "${WORK_ROOT}-external-cache")
+file(REMOVE_RECURSE "${external_cache}")
+file(MAKE_DIRECTORY "${external_cache}")
+file(CREATE_LINK "${external_cache}" "${WORK_ROOT}/.tree-legibility/cache" SYMBOLIC
+     RESULT cache_link_result)
+if(NOT cache_link_result STREQUAL "0")
+  message(FATAL_ERROR "Could not create cache-directory symlink")
+endif()
+
+execute_process(
+  COMMAND "${CLI}" check "${WORK_ROOT}" --format json
+  RESULT_VARIABLE cache_result
+  ERROR_VARIABLE cache_errors
+)
+
+if(NOT cache_result EQUAL 0)
+  message(FATAL_ERROR "Check failed with symlinked cache directory\n${cache_errors}")
+endif()
+file(GLOB external_records "${external_cache}/*.tlc")
+if(EXISTS "${external_cache}/.lock" OR external_records)
+  message(FATAL_ERROR "Cache wrote through symlinked cache directory")
 endif()

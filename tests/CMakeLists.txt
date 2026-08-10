@@ -342,6 +342,16 @@ add_test(
 )
 
 add_test(
+  NAME toml_quoted_pattern_values
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-toml-strings
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/empty.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/clean_json.cmake
+)
+
+add_test(
   NAME go_public_package_root
   COMMAND
     ${CMAKE_COMMAND}
@@ -378,6 +388,16 @@ add_test(
     -DCLI=$<TARGET_FILE:tree-legibility>
     -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-yaml
     -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/config_toml.json
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/service_boundary_json.cmake
+)
+
+add_test(
+  NAME yaml_single_quoted_hash
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-yaml-hash
+    -DEXPECTED=${CMAKE_CURRENT_SOURCE_DIR}/expected/config_yaml_hash.json
     -P ${CMAKE_CURRENT_SOURCE_DIR}/service_boundary_json.cmake
 )
 
@@ -427,6 +447,26 @@ add_test(
     -DCLI=$<TARGET_FILE:tree-legibility>
     -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-invalid-empty
     -DEXPECTED_ERROR=invalid TOML configuration
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/invalid_config.cmake
+)
+
+add_test(
+  NAME signed_unsigned_config_value
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-invalid-signed
+    -DEXPECTED_ERROR=invalid TOML configuration
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/invalid_config.cmake
+)
+
+add_test(
+  NAME unsupported_config_pattern
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCLI=$<TARGET_FILE:tree-legibility>
+    -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/config-invalid-pattern
+    -DEXPECTED_ERROR=invalid merged boundary configuration
     -P ${CMAKE_CURRENT_SOURCE_DIR}/invalid_config.cmake
 )
 

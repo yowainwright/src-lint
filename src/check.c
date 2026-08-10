@@ -4,6 +4,7 @@
 #include "graph.h"
 #include "internal.h"
 
+#include <errno.h>
 #include <fts.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -728,19 +729,34 @@ static int emit_policy_violation(TlContext *context, const TlConfig *config, con
   return 1;
 }
 
+static bool classify_canonical_target(TlContext *context, const TlConfig *config,
+                                      const char *source, const char *target, bool found,
+                                      char *canonical, TlEdgePolicy *policy) {
+  strcpy(canonical, target);
+  if (!found || !canonicalize_repository_path(canonical)) return false;
+  classify_policy(context, config, source, canonical, policy);
+  return true;
+}
+
 static int evaluate_import(TlContext *context, const TlConfig *config, const char *source,
                            const TlImport *import) {
   char target[TL_PATH_CAPACITY];
   if (!resolve_import_target(context, config, source, import, target)) return 0;
   const bool found = resolve_repository_path(target, import->language);
-  const bool resolved = found && canonicalize_repository_path(target);
-  TlEdgePolicy policy;
-  classify_policy(context, config, source, target, &policy);
-  if (policy.violation)
-    return emit_policy_violation(context, config, source, target, import, &policy);
+  TlEdgePolicy lexical_policy;
+  classify_policy(context, config, source, target, &lexical_policy);
+  char canonical[TL_PATH_CAPACITY];
+  TlEdgePolicy canonical_policy = {0};
+  const bool resolved = classify_canonical_target(context, config, source, target, found, canonical,
+                                                  &canonical_policy);
+  if (lexical_policy.violation)
+    return emit_policy_violation(context, config, source, target, import, &lexical_policy);
+  if (canonical_policy.violation)
+    return emit_policy_violation(context, config, source, canonical, import, &canonical_policy);
   if (!resolved) return emit_unresolved(context, config, source, target, import);
-  const TlEdgePolicy *metadata = policy.applied ? &policy : NULL;
-  add_graph_edge(context, config, source, target, import, TL_EDGE_ALLOWED, NULL, metadata, NULL);
+  const TlEdgePolicy *metadata = canonical_policy.applied ? &canonical_policy : &lexical_policy;
+  if (!metadata->applied) metadata = NULL;
+  add_graph_edge(context, config, source, canonical, import, TL_EDGE_ALLOWED, NULL, metadata, NULL);
   return 0;
 }
 
@@ -843,7 +859,10 @@ static int compare_entries(const FTSENT **left, const FTSENT **right) {
 static int scan_entries(TlContext *context, FTS *tree) {
   int findings = 0;
   FTSENT *entry;
-  while ((entry = fts_read(tree)) != NULL) {
+  while (true) {
+    errno = 0;
+    entry = fts_read(tree);
+    if (!entry) break;
     if (skip_entry(tree, entry)) continue;
     const int file_findings = scan_entry(context, entry);
     if (file_findings < 0) {
@@ -851,6 +870,10 @@ static int scan_entries(TlContext *context, FTS *tree) {
       break;
     }
     findings += file_findings;
+  }
+  if (findings >= 0 && errno != 0) {
+    report_path_error(context->errors, "scan ", context->root);
+    return -1;
   }
   return findings;
 }

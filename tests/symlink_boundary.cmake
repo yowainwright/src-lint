@@ -28,3 +28,27 @@ endif()
 if(NOT output STREQUAL expected)
   message(FATAL_ERROR "Unexpected JSON diagnostic\n${output}")
 endif()
+
+file(REMOVE_RECURSE "${WORK_ROOT}")
+file(COPY "${SOURCE_FIXTURE}/" DESTINATION "${WORK_ROOT}")
+file(WRITE "${WORK_ROOT}/services/orders/create.ts"
+     "import { ledger } from \"../billing/internal/ledger.ts\";\nvoid ledger;\n")
+file(REMOVE_RECURSE "${WORK_ROOT}/services/billing/internal")
+file(MAKE_DIRECTORY "${WORK_ROOT}/vendor/billing-internal")
+file(WRITE "${WORK_ROOT}/vendor/billing-internal/ledger.ts" "export const ledger = 1;\n")
+file(CREATE_LINK "../../vendor/billing-internal"
+     "${WORK_ROOT}/services/billing/internal" SYMBOLIC RESULT subtree_link_result)
+if(NOT subtree_link_result STREQUAL "0")
+  message(FATAL_ERROR "Could not create symlinked boundary subtree")
+endif()
+
+execute_process(
+  COMMAND "${CLI}" check "${WORK_ROOT}" --format json --strict
+  RESULT_VARIABLE subtree_result
+  OUTPUT_VARIABLE subtree_output
+  ERROR_VARIABLE subtree_errors
+)
+
+if(NOT subtree_result EQUAL 1 OR NOT subtree_output MATCHES "TL1001")
+  message(FATAL_ERROR "Symlinked boundary subtree bypassed policy\n${subtree_output}\n${subtree_errors}")
+endif()

@@ -265,8 +265,10 @@ static void write_edge(FILE *output, const TlGraphEdge *edge, bool comma) {
 }
 
 bool tl_graph_write_json(TlGraph *graph, FILE *output) {
-  qsort(graph->nodes, graph->node_count, sizeof(*graph->nodes), compare_nodes);
-  qsort(graph->edges, graph->edge_count, sizeof(*graph->edges), compare_edges);
+  if (graph->node_count > 1)
+    qsort(graph->nodes, graph->node_count, sizeof(*graph->nodes), compare_nodes);
+  if (graph->edge_count > 1)
+    qsort(graph->edges, graph->edge_count, sizeof(*graph->edges), compare_edges);
   fputs("{\n  \"nodes\": [\n", output);
   for (size_t index = 0; index < graph->node_count; index += 1) {
     write_node(output, &graph->nodes[index], index + 1 < graph->node_count);
@@ -291,7 +293,8 @@ static void write_boundary(FILE *output, const TlDiscoveredBoundary *boundary, b
 }
 
 static void sort_boundaries(TlGraph *graph) {
-  qsort(graph->boundaries, graph->boundary_count, sizeof(*graph->boundaries), compare_boundaries);
+  if (graph->boundary_count > 1)
+    qsort(graph->boundaries, graph->boundary_count, sizeof(*graph->boundaries), compare_boundaries);
 }
 
 bool tl_graph_write_discovery_json(TlGraph *graph, FILE *output) {

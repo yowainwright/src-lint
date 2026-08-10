@@ -160,18 +160,34 @@ static char *trim(char *value) {
   return value;
 }
 
-static void strip_toml_comment(char *line) {
-  bool quoted = false;
+static bool escaped_config_character(const char *cursor, char quote) {
+  return quote == '"' && *cursor == '\\' && cursor[1] != '\0';
+}
+
+static void strip_config_comment(char *line) {
+  char quote = '\0';
   for (char *cursor = line; *cursor; cursor += 1) {
-    const bool quote = *cursor == '"' && (cursor == line || cursor[-1] != '\\');
-    if (quote) quoted = !quoted;
-    if (*cursor != '#' || quoted) continue;
+    if (escaped_config_character(cursor, quote)) {
+      cursor += 1;
+      continue;
+    }
+    if (quote && *cursor == quote) {
+      quote = '\0';
+      continue;
+    }
+    if (quote) continue;
+    if (*cursor == '"' || *cursor == '\'') {
+      quote = *cursor;
+      continue;
+    }
+    if (*cursor != '#') continue;
     *cursor = '\0';
     return;
   }
 }
 
 static bool parse_unsigned(char *value, size_t *result) {
+  if (*value < '0' || *value > '9') return false;
   errno = 0;
   char *end;
   const unsigned long parsed = strtoul(value, &end, 10);
@@ -190,13 +206,43 @@ static bool parse_bool(const char *value, bool *result) {
   return true;
 }
 
+static bool decode_toml_escape(char input, char *output) {
+  const char *escapes = "btnfr\"\\";
+  const char values[] = {'\b', '\t', '\n', '\f', '\r', '"', '\\'};
+  const char *match = strchr(escapes, input);
+  if (!match) return false;
+  *output = values[match - escapes];
+  return true;
+}
+
+static bool copy_toml_string(const char *cursor, const char *end, char *output) {
+  while (cursor < end) {
+    if (*cursor == '"') return false;
+    if (*cursor != '\\') {
+      *output++ = *cursor;
+      cursor += 1;
+      continue;
+    }
+    cursor += 1;
+    char decoded;
+    if (cursor >= end || !decode_toml_escape(*cursor, &decoded)) return false;
+    *output++ = decoded;
+    cursor += 1;
+  }
+  *output = '\0';
+  return true;
+}
+
 static char *parse_string(const char *value) {
   const size_t length = strlen(value);
   if (length < 2 || value[0] != '"' || value[length - 1] != '"') return NULL;
   char *copy = malloc(length - 1);
   if (!copy) return NULL;
-  memcpy(copy, value + 1, length - 2);
-  copy[length - 2] = '\0';
+  const bool copied = copy_toml_string(value + 1, value + length - 1, copy);
+  if (!copied) {
+    free(copy);
+    return NULL;
+  }
   return copy;
 }
 
@@ -211,6 +257,29 @@ static bool add_pattern(TlPatternList *patterns, char *pattern) {
   return true;
 }
 
+static char *toml_string_end(char *value) {
+  if (*value != '"') return NULL;
+  for (char *cursor = value + 1; *cursor; cursor += 1) {
+    if (*cursor == '\\' && cursor[1]) {
+      cursor += 1;
+      continue;
+    }
+    if (*cursor == '"') return cursor + 1;
+  }
+  return NULL;
+}
+
+static char *parse_pattern_item(char *cursor, TlPatternList *patterns) {
+  char *end = toml_string_end(cursor);
+  if (!end) return NULL;
+  const char saved = *end;
+  *end = '\0';
+  char *pattern = parse_string(cursor);
+  *end = saved;
+  if (!pattern || !add_pattern(patterns, pattern)) return NULL;
+  return trim_left(end);
+}
+
 static bool parse_pattern_array(char *value, TlPatternList *patterns) {
   value = trim(value);
   const size_t length = strlen(value);
@@ -220,12 +289,11 @@ static bool parse_pattern_array(char *value, TlPatternList *patterns) {
   value[length - 1] = '\0';
   char *cursor = value + 1;
   while (*(cursor = trim_left(cursor))) {
-    char *comma = strchr(cursor, ',');
-    if (comma) *comma = '\0';
-    char *pattern = parse_string(trim(cursor));
-    if (!pattern || !add_pattern(patterns, pattern)) return false;
-    if (!comma) break;
-    cursor = comma + 1;
+    cursor = parse_pattern_item(cursor, patterns);
+    if (!cursor) return false;
+    if (*cursor == '\0') break;
+    if (*cursor != ',') return false;
+    cursor += 1;
   }
   return true;
 }
@@ -308,7 +376,7 @@ static bool apply_toml_value(TlConfig *config, TlTomlState *state, char *line) {
 }
 
 static bool parse_toml_line(char *line, TlConfig *config, TlTomlState *state) {
-  strip_toml_comment(line);
+  strip_config_comment(line);
   line = trim(line);
   if (*line == '\0') return true;
   if (*line == '[') return parse_section(line, config, state);
@@ -421,9 +489,10 @@ static char *decode_json_string(TlJsonParser *parser, char *value) {
   char *output = value;
   while (*cursor && *cursor != '"') {
     const unsigned char character = (unsigned char)*cursor++;
-    if (character < 0x20) break;
-    if (character == '\\' && !decode_json_escape(&cursor, &output)) break;
-    if (character != '\\') *output++ = (char)character;
+    if (character < 0x20) return NULL;
+    const bool escape = character == '\\';
+    if (escape && !decode_json_escape(&cursor, &output)) return NULL;
+    if (!escape) *output++ = (char)character;
   }
   if (*cursor != '"') return NULL;
   *output = '\0';
@@ -722,7 +791,7 @@ static bool parse_yaml_mapping(TlConfig *config, TlYamlState *state, size_t inde
 }
 
 static bool parse_yaml_line(TlConfig *config, TlYamlState *state, char *line) {
-  strip_toml_comment(line);
+  strip_config_comment(line);
   trim_right(line);
   const size_t indent = yaml_indent(line);
   if (line[indent] == '\0') return true;
@@ -913,6 +982,20 @@ static bool valid_boundary_root(const char *root) {
   return false;
 }
 
+static bool valid_pattern(const char *pattern) {
+  const char *star = strchr(pattern, '*');
+  if (!star) return *pattern != '\0';
+  const bool has_prefix = star >= pattern + 2 && star[-1] == '/';
+  return has_prefix && strcmp(star, "**") == 0;
+}
+
+static bool valid_patterns(const TlPatternList *patterns) {
+  for (size_t index = 0; index < patterns->count; index += 1) {
+    if (!valid_pattern(patterns->items[index])) return false;
+  }
+  return true;
+}
+
 static bool duplicate_boundary_root(const TlConfig *config, size_t index) {
   const char *root = config->boundaries[index].root;
   for (size_t other = 0; other < index; other += 1) {
@@ -928,6 +1011,9 @@ static bool valid_boundaries(const TlConfig *config) {
     if (!valid_name || !boundary->root_set) return false;
     if (!valid_boundary_root(boundary->root) || duplicate_boundary_root(config, index))
       return false;
+    const bool valid_public = valid_patterns(&boundary->public_entries);
+    const bool valid_allow = valid_patterns(&boundary->allow);
+    if (!valid_public || !valid_allow) return false;
   }
   return true;
 }
@@ -985,35 +1071,20 @@ bool tl_config_boundary_for_path(const TlConfig *config, const char *path,
   return longest > 0;
 }
 
-static bool glob_match(const char *pattern, const char *value);
-
-static bool match_double_star(const char *pattern, const char *value) {
-  pattern += 2;
-  if (*pattern == '/') pattern += 1;
-  for (const char *cursor = value;; cursor += 1) {
-    if (glob_match(pattern, cursor)) return true;
-    if (*cursor == '\0') return false;
-  }
-}
-
-static bool match_single_star(const char *pattern, const char *value) {
-  for (const char *cursor = value;; cursor += 1) {
-    if (glob_match(pattern + 1, cursor)) return true;
-    if (*cursor == '\0' || *cursor == '/') return false;
-  }
-}
-
-static bool glob_match(const char *pattern, const char *value) {
-  if (*pattern == '\0') return *value == '\0';
-  if (*value == '\0' && strcmp(pattern, "/**") == 0) return true;
-  if (pattern[0] == '*' && pattern[1] == '*') return match_double_star(pattern, value);
-  if (*pattern == '*') return match_single_star(pattern, value);
-  return *value && *pattern == *value && glob_match(pattern + 1, value + 1);
+static bool pattern_matches(const char *pattern, const char *value) {
+  const char *star = strchr(pattern, '*');
+  if (!star) return strcmp(pattern, value) == 0;
+  const size_t prefix_length = (size_t)(star - pattern) - 1;
+  const size_t value_length = strlen(value);
+  if (value_length < prefix_length) return false;
+  const bool exact = value_length == prefix_length;
+  const bool descendant = value_length > prefix_length && value[prefix_length] == '/';
+  return strncmp(pattern, value, prefix_length) == 0 && (exact || descendant);
 }
 
 static bool pattern_list_matches(const TlPatternList *patterns, const char *value) {
   for (size_t index = 0; index < patterns->count; index += 1) {
-    if (glob_match(patterns->items[index], value)) return true;
+    if (pattern_matches(patterns->items[index], value)) return true;
   }
   return false;
 }

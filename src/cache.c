@@ -36,6 +36,11 @@ static bool directory_path(const char *path) {
   return stat(path, &information) == 0 && S_ISDIR(information.st_mode);
 }
 
+static bool direct_directory_path(const char *path) {
+  struct stat information;
+  return lstat(path, &information) == 0 && S_ISDIR(information.st_mode);
+}
+
 static bool parent_directory(char *directory) {
   if (strcmp(directory, "/") == 0) return false;
   char *slash = strrchr(directory, '/');
@@ -89,7 +94,7 @@ static bool repository_root(const TlConfig *config, const char *source_path, con
 
 static bool ensure_directory(const char *path) {
   if (mkdir(path, 0777) == 0) return true;
-  return errno == EEXIST && directory_path(path);
+  return errno == EEXIST && direct_directory_path(path);
 }
 
 static bool create_cache_directory(const char *root, char *directory) {
@@ -171,20 +176,24 @@ static bool inspect_cache_entry(TlCacheEntries *entries, const char *directory, 
   const int written = snprintf(path, sizeof(path), "%s/%s", directory, name);
   if (written < 0 || (size_t)written >= sizeof(path)) return false;
   struct stat information;
-  if (stat(path, &information) != 0 || !S_ISREG(information.st_mode)) return true;
+  if (lstat(path, &information) != 0 || !S_ISREG(information.st_mode)) return true;
   return add_cache_entry(entries, path, &information);
 }
 
 static bool collect_cache_entries(const TlCache *cache, TlCacheEntries *entries) {
   DIR *directory = opendir(cache->directory);
   if (!directory) return false;
-  struct dirent *item;
+  struct dirent *item = NULL;
   bool collected = true;
-  while ((item = readdir(directory)) != NULL && collected) {
+  while (collected) {
+    errno = 0;
+    item = readdir(directory);
+    if (!item) break;
     collected = inspect_cache_entry(entries, cache->directory, item->d_name);
   }
-  closedir(directory);
-  return collected;
+  const bool read = collected && errno == 0;
+  const bool closed = closedir(directory) == 0;
+  return read && closed;
 }
 
 static int compare_cache_entries(const void *left, const void *right) {
@@ -203,7 +212,8 @@ static bool trim_cache(const TlCache *cache, size_t *total_size) {
     free(entries.items);
     return false;
   }
-  qsort(entries.items, entries.count, sizeof(*entries.items), compare_cache_entries);
+  if (entries.count > 1)
+    qsort(entries.items, entries.count, sizeof(*entries.items), compare_cache_entries);
   for (size_t index = 0; index < entries.count && entries.total_size > cache->max_bytes;
        index += 1) {
     if (unlink(entries.items[index].path) != 0) continue;
@@ -233,13 +243,15 @@ static bool read_record_header(FILE *file, size_t *count) {
   char magic[8];
   if (!fgets(magic, sizeof(magic), file)) return false;
   if (strcmp(magic, "TLC1\n") != 0) return false;
-  return fscanf(file, "%zu\n", count) == 1 && *count <= 1000000;
+  return fscanf(file, "%zu", count) == 1 && *count <= 1000000 && fgetc(file) == '\n';
 }
 
 static bool read_import_record(FILE *file, TlCacheImportRecord *record) {
-  const int read = fscanf(file, "%u %zu %zu %zu\n", &record->language, &record->line,
-                          &record->column, &record->length);
-  return read == 4 && record->language <= TL_LANGUAGE_PROTO && record->length < TL_PATH_CAPACITY;
+  const int read = fscanf(file, "%u %zu %zu %zu", &record->language, &record->line, &record->column,
+                          &record->length);
+  const bool valid =
+      read == 4 && record->language <= TL_LANGUAGE_PROTO && record->length < TL_PATH_CAPACITY;
+  return valid && fgetc(file) == '\n';
 }
 
 static char *read_cached_specifier(FILE *file, size_t length) {
@@ -275,17 +287,26 @@ static bool read_record(FILE *file, TlImportList *imports) {
   return true;
 }
 
+static FILE *open_cache_file(const char *path) {
+  const int descriptor = open(path, O_RDONLY | O_NOFOLLOW);
+  if (descriptor < 0) return NULL;
+  FILE *file = fdopen(descriptor, "rb");
+  if (file) return file;
+  close(descriptor);
+  return NULL;
+}
+
 bool tl_cache_load(TlCache *cache, const char *source_path, const char *content,
                    TlImportList *imports) {
   if (!cache->enabled) return false;
   char path[TL_PATH_CAPACITY];
   const uint64_t key = cache_key(cache, source_path, content);
   if (!record_path(cache, key, path)) return false;
-  FILE *file = fopen(path, "rb");
+  FILE *file = open_cache_file(path);
   if (!file) return false;
   const bool loaded = read_record(file, imports);
+  if (loaded) (void)futimens(fileno(file), NULL);
   fclose(file);
-  if (loaded) utimensat(AT_FDCWD, path, NULL, 0);
   if (!loaded) {
     tl_import_list_free(imports);
     unlink(path);
@@ -306,15 +327,21 @@ static bool write_record(FILE *file, const TlImportList *imports) {
   return true;
 }
 
-static bool temporary_path(const char *path, char *temporary) {
-  const int written = snprintf(temporary, TL_PATH_CAPACITY, "%s.tmp.%ld", path, (long)getpid());
-  return written >= 0 && written < TL_PATH_CAPACITY;
+static FILE *create_temporary_file(const char *path, char *temporary) {
+  const int written = snprintf(temporary, TL_PATH_CAPACITY, "%s.tmp.XXXXXX", path);
+  if (written < 0 || written >= TL_PATH_CAPACITY) return NULL;
+  const int descriptor = mkstemp(temporary);
+  if (descriptor < 0) return NULL;
+  FILE *file = fdopen(descriptor, "wb");
+  if (file) return file;
+  close(descriptor);
+  unlink(temporary);
+  return NULL;
 }
 
 static bool store_record(const char *path, const TlImportList *imports) {
   char temporary[TL_PATH_CAPACITY];
-  if (!temporary_path(path, temporary)) return false;
-  FILE *file = fopen(temporary, "wb");
+  FILE *file = create_temporary_file(path, temporary);
   if (!file) return false;
   const bool written = write_record(file, imports);
   const bool closed = fclose(file) == 0;
@@ -365,7 +392,7 @@ static bool control_path(const TlCache *cache, const char *name, char *path) {
 static bool lock_cache(TlCache *cache) {
   char path[TL_PATH_CAPACITY];
   if (!control_path(cache, ".lock", path)) return false;
-  const int descriptor = open(path, O_RDWR | O_CREAT, 0666);
+  const int descriptor = open(path, O_RDWR | O_CREAT | O_NOFOLLOW, 0666);
   if (descriptor < 0) return false;
   struct flock lock = {.l_type = F_WRLCK, .l_whence = SEEK_SET};
   if (fcntl(descriptor, F_SETLK, &lock) == 0) {
@@ -392,7 +419,7 @@ static bool control_exists(const TlCache *cache, const char *name) {
 static bool read_tracked_bytes(const TlCache *cache, size_t *bytes) {
   char path[TL_PATH_CAPACITY];
   if (!control_path(cache, ".size", path)) return false;
-  FILE *file = fopen(path, "rb");
+  FILE *file = open_cache_file(path);
   if (!file) return false;
   const bool read = fscanf(file, "%zu", bytes) == 1;
   const bool closed = fclose(file) == 0;
@@ -402,8 +429,8 @@ static bool read_tracked_bytes(const TlCache *cache, size_t *bytes) {
 static bool write_tracked_bytes(const TlCache *cache) {
   char path[TL_PATH_CAPACITY];
   char temporary[TL_PATH_CAPACITY];
-  if (!control_path(cache, ".size", path) || !temporary_path(path, temporary)) return false;
-  FILE *file = fopen(temporary, "wb");
+  if (!control_path(cache, ".size", path)) return false;
+  FILE *file = create_temporary_file(path, temporary);
   if (!file) return false;
   const bool written = fprintf(file, "%zu\n", cache->tracked_bytes) > 0;
   const bool closed = fclose(file) == 0;

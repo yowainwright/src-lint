@@ -120,7 +120,7 @@ public = ["api/**", "proto/**"]
 
 A nested rc file inherits its ancestors within the repository. Boundary maps merge by name. Child scalar and array values replace parent values.
 
-`allow` belongs to the importing boundary and matches repository-relative targets. `public` belongs to the imported boundary and matches paths inside it.
+`allow` belongs to the importing boundary and matches repository-relative targets. `public` belongs to the imported boundary and matches paths inside it. Entries are exact paths or prefixes ending in `/**`; other wildcard forms are invalid.
 
 ## Cache
 
