@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+readonly REPO_ROOT
+
+run_suite() {
+  local name="$1"
+  local build_type="$2"
+  shift 2
+  local build_dir="$REPO_ROOT/build-hooks-$name"
+  cmake -S "$REPO_ROOT" -B "$build_dir" -DCMAKE_BUILD_TYPE="$build_type" "$@"
+  cmake --build "$build_dir" --parallel
+  ctest --test-dir "$build_dir" --output-on-failure
+}
+
+run_suite release Release
+run_suite sanitizers Debug -DTREE_LEGIBILITY_SANITIZERS=ON

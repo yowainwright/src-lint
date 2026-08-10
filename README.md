@@ -102,6 +102,14 @@ Release tests generate a 10,000-file repository and enforce the 10 ms startup an
 
 <!-- test command and test registration matching CMakeLists.txt and tests/CMakeLists.txt -->
 
+Install the repository's versioned Git hooks for commit and push checks:
+
+```sh
+./scripts/install-git-hooks.sh
+```
+
+The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The pre-push hook runs the Release and sanitizer suites. Hook updates take effect from `.githooks` without reinstalling.
+
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
