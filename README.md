@@ -17,6 +17,40 @@ With no rc file, the CLI treats sibling directories under `services/<name>` as b
 
 Explicit policy takes precedence over inference. Unresolved local imports are `TL2001` advisories by default and errors under `--strict`.
 
+## Examples
+
+<!-- default public boundary paths from src/check.c and import syntax from src/imports.c -->
+
+Cross-boundary imports should use an entry exposed through `api/`, `public/`, or `proto/`. Direct imports from an owner's internal implementation produce `TL1001`.
+
+### TypeScript and JavaScript
+
+```diff
+-import { postEntry } from "../billing/internal/ledger";
++import { postEntry } from "../billing/api";
+```
+
+### Python
+
+```diff
+-from services.billing.internal import ledger
++from services.billing.api import ledger
+```
+
+### Go
+
+```diff
+-import "example.com/repo/services/billing/internal/ledger"
++import "example.com/repo/services/billing/api"
+```
+
+### Proto
+
+```diff
+-import "services/billing/internal/ledger.proto";
++import public "services/billing/proto/public.proto";
+```
+
 ## Build
 
 <!-- build commands and sanitizer option matching CMakeLists.txt -->
