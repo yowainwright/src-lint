@@ -63,8 +63,6 @@ install_manifest.txt
 .DS_Store
 
 .dolt/
-.beads-credential-key
-.beads/
 
 /.claude/settings.local.json
 /.claude/*.log
