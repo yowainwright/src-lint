@@ -1,7 +1,7 @@
 {
   "findings": [
     {
-      "rule": "TL1001",
+      "rule": "SL1001",
       "source": "services/orders/module.ts",
       "line": 2,
       "column": 4,
@@ -10,7 +10,7 @@
       "target": "services/billing/internal/lazy.ts"
     },
     {
-      "rule": "TL1001",
+      "rule": "SL1001",
       "source": "services/orders/module.ts",
       "line": 5,
       "column": 4,
@@ -19,7 +19,7 @@
       "target": "services/billing/internal/ledger.ts"
     },
     {
-      "rule": "TL1001",
+      "rule": "SL1001",
       "source": "services/orders/module.ts",
       "line": 7,
       "column": 37,
@@ -28,7 +28,7 @@
       "target": "services/billing/internal/other.ts"
     },
     {
-      "rule": "TL1001",
+      "rule": "SL1001",
       "source": "services/orders/module.ts",
       "line": 8,
       "column": 39,

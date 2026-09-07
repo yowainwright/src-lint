@@ -1,35 +1,35 @@
-#ifndef TREE_LEGIBILITY_INTERNAL_H
-#define TREE_LEGIBILITY_INTERNAL_H
+#ifndef SRC_LINT_INTERNAL_H
+#define SRC_LINT_INTERNAL_H
 
 #include <stdbool.h>
 #include <stddef.h>
 
-#define TL_PATH_CAPACITY 4096
-#define TL_OWNER_CAPACITY 128
+#define SL_PATH_CAPACITY 4096
+#define SL_OWNER_CAPACITY 128
 
 typedef enum {
-  TL_LANGUAGE_JAVASCRIPT,
-  TL_LANGUAGE_PYTHON,
-  TL_LANGUAGE_GO,
-  TL_LANGUAGE_PROTO
-} TlLanguage;
+  SL_LANGUAGE_JAVASCRIPT,
+  SL_LANGUAGE_PYTHON,
+  SL_LANGUAGE_GO,
+  SL_LANGUAGE_PROTO
+} SlLanguage;
 
 typedef struct {
   char *specifier;
   size_t line;
   size_t column;
-  TlLanguage language;
-} TlImport;
+  SlLanguage language;
+} SlImport;
 
 typedef struct {
-  TlImport *items;
+  SlImport *items;
   size_t count;
   size_t capacity;
-} TlImportList;
+} SlImportList;
 
-bool tl_import_list_add(TlImportList *list, const char *specifier, size_t line, size_t column,
-                        TlLanguage language);
-void tl_import_list_free(TlImportList *list);
-bool tl_parse_imports(const char *path, char *content, TlImportList *list);
+bool sl_import_list_add(SlImportList *list, const char *specifier, size_t line, size_t column,
+                        SlLanguage language);
+void sl_import_list_free(SlImportList *list);
+bool sl_parse_imports(const char *path, char *content, SlImportList *list);
 
 #endif

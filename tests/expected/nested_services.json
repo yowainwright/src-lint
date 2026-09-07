@@ -1,7 +1,7 @@
 {
   "findings": [
     {
-      "rule": "TL1001",
+      "rule": "SL1001",
       "source": "services/orders/src/services/client.ts",
       "line": 1,
       "column": 28,

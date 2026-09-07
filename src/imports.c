@@ -7,19 +7,19 @@
 typedef struct {
   char *start;
   size_t length;
-} TlToken;
+} SlToken;
 
 typedef struct {
   char *specifier;
   char *end;
-} TlImportEdge;
+} SlImportEdge;
 
 typedef struct {
   char *source_start;
   char *cursor;
   bool expect_from;
   bool regex_allowed;
-} TlJsScanner;
+} SlJsScanner;
 
 static char *duplicate_string(const char *value) {
   const size_t length = strlen(value) + 1;
@@ -28,28 +28,28 @@ static char *duplicate_string(const char *value) {
   return copy;
 }
 
-static bool grow_imports(TlImportList *list) {
+static bool grow_imports(SlImportList *list) {
   const size_t capacity = list->capacity == 0 ? 8 : list->capacity * 2;
-  TlImport *items = realloc(list->items, capacity * sizeof(*items));
+  SlImport *items = realloc(list->items, capacity * sizeof(*items));
   if (!items) return false;
   list->items = items;
   list->capacity = capacity;
   return true;
 }
 
-bool tl_import_list_add(TlImportList *list, const char *specifier, size_t line, size_t column,
-                        TlLanguage language) {
+bool sl_import_list_add(SlImportList *list, const char *specifier, size_t line, size_t column,
+                        SlLanguage language) {
   if (list->count == list->capacity && !grow_imports(list)) return false;
   char *copy = duplicate_string(specifier);
   if (!copy) return false;
-  list->items[list->count++] = (TlImport){copy, line, column, language};
+  list->items[list->count++] = (SlImport){copy, line, column, language};
   return true;
 }
 
-void tl_import_list_free(TlImportList *list) {
+void sl_import_list_free(SlImportList *list) {
   for (size_t index = 0; index < list->count; index += 1) free(list->items[index].specifier);
   free(list->items);
-  *list = (TlImportList){0};
+  *list = (SlImportList){0};
 }
 
 static bool quote_character(char character) {
@@ -85,7 +85,7 @@ static bool identifier_part(char character) {
   return identifier_start(character) || (character >= '0' && character <= '9');
 }
 
-static bool token_is(const TlToken *token, const char *value) {
+static bool token_is(const SlToken *token, const char *value) {
   return strlen(value) == token->length && strncmp(token->start, value, token->length) == 0;
 }
 
@@ -143,7 +143,7 @@ static char *skip_js_trivia(char *cursor) {
   return cursor;
 }
 
-static bool read_identifier(TlJsScanner *scanner, TlToken *token) {
+static bool read_identifier(SlJsScanner *scanner, SlToken *token) {
   if (!identifier_start(*scanner->cursor)) return false;
   token->start = scanner->cursor;
   scanner->cursor += 1;
@@ -152,7 +152,7 @@ static bool read_identifier(TlJsScanner *scanner, TlToken *token) {
   return true;
 }
 
-static bool skip_js_regex(TlJsScanner *scanner) {
+static bool skip_js_regex(SlJsScanner *scanner) {
   if (*scanner->cursor != '/' || !scanner->regex_allowed) return false;
   char *end = regex_literal_end(scanner->cursor);
   if (!end) return false;
@@ -161,7 +161,7 @@ static bool skip_js_regex(TlJsScanner *scanner) {
   return true;
 }
 
-static bool skip_js_ignored(TlJsScanner *scanner) {
+static bool skip_js_ignored(SlJsScanner *scanner) {
   if (line_comment_start(scanner->cursor)) {
     scanner->cursor = skip_line_comment(scanner->cursor);
     return true;
@@ -177,7 +177,7 @@ static bool skip_js_ignored(TlJsScanner *scanner) {
   return true;
 }
 
-static bool regex_prefix_token(const TlToken *token) {
+static bool regex_prefix_token(const SlToken *token) {
   return token_is(token, "await") || token_is(token, "case") || token_is(token, "delete") ||
          token_is(token, "do") || token_is(token, "else") || token_is(token, "in") ||
          token_is(token, "instanceof") || token_is(token, "new") || token_is(token, "of") ||
@@ -185,7 +185,7 @@ static bool regex_prefix_token(const TlToken *token) {
          token_is(token, "void") || token_is(token, "yield");
 }
 
-static bool read_js_token(TlJsScanner *scanner, TlToken *token) {
+static bool read_js_token(SlJsScanner *scanner, SlToken *token) {
   if (!read_identifier(scanner, token)) return false;
   scanner->regex_allowed = regex_prefix_token(token);
   return true;
@@ -199,7 +199,7 @@ static bool closing_js_token(char character) {
   return character == ')' || character == ']' || character == '}' || character == '.';
 }
 
-static void advance_js_character(TlJsScanner *scanner) {
+static void advance_js_character(SlJsScanner *scanner) {
   const char character = *scanner->cursor;
   if (js_whitespace(character)) {
     scanner->cursor += 1;
@@ -215,7 +215,7 @@ static void advance_js_character(TlJsScanner *scanner) {
   scanner->cursor += 1;
 }
 
-static bool next_js_token(TlJsScanner *scanner, TlToken *token) {
+static bool next_js_token(SlJsScanner *scanner, SlToken *token) {
   while (*scanner->cursor) {
     if (skip_js_ignored(scanner)) continue;
     if (read_js_token(scanner, token)) return true;
@@ -235,7 +235,7 @@ static bool has_template_substitution(const char *start, const char *end) {
   return false;
 }
 
-static bool read_module_literal(char *cursor, bool allow_template, TlImportEdge *edge) {
+static bool read_module_literal(char *cursor, bool allow_template, SlImportEdge *edge) {
   cursor = skip_js_trivia(cursor);
   const bool quoted = *cursor == '\'' || *cursor == '"';
   if (!quoted && (!allow_template || *cursor != '`')) return false;
@@ -247,7 +247,7 @@ static bool read_module_literal(char *cursor, bool allow_template, TlImportEdge 
   return true;
 }
 
-static bool read_call_import(TlJsScanner *scanner, TlImportEdge *edge) {
+static bool read_call_import(SlJsScanner *scanner, SlImportEdge *edge) {
   char *cursor = skip_js_trivia(scanner->cursor);
   if (*cursor != '(') return false;
   if (!read_module_literal(cursor + 1, true, edge)) return false;
@@ -255,13 +255,13 @@ static bool read_call_import(TlJsScanner *scanner, TlImportEdge *edge) {
   return true;
 }
 
-static bool read_direct_import(TlJsScanner *scanner, TlImportEdge *edge) {
+static bool read_direct_import(SlJsScanner *scanner, SlImportEdge *edge) {
   if (!read_module_literal(scanner->cursor, false, edge)) return false;
   scanner->cursor = edge->end + 1;
   return true;
 }
 
-static bool read_import_keyword(TlJsScanner *scanner, TlImportEdge *edge) {
+static bool read_import_keyword(SlJsScanner *scanner, SlImportEdge *edge) {
   scanner->expect_from = true;
   if (read_call_import(scanner, edge)) {
     scanner->expect_from = false;
@@ -272,7 +272,7 @@ static bool read_import_keyword(TlJsScanner *scanner, TlImportEdge *edge) {
   return true;
 }
 
-static bool bare_token(const TlJsScanner *scanner, const TlToken *token) {
+static bool bare_token(const SlJsScanner *scanner, const SlToken *token) {
   char *cursor = token->start;
   while (cursor > scanner->source_start) {
     const char previous = cursor[-1];
@@ -284,7 +284,7 @@ static bool bare_token(const TlJsScanner *scanner, const TlToken *token) {
   return cursor == scanner->source_start || cursor[-1] != '.';
 }
 
-static bool import_token(TlJsScanner *scanner, const TlToken *token, TlImportEdge *edge) {
+static bool import_token(SlJsScanner *scanner, const SlToken *token, SlImportEdge *edge) {
   const bool bare = bare_token(scanner, token);
   if (bare && token_is(token, "require")) return read_call_import(scanner, edge);
   if (bare && token_is(token, "export")) {
@@ -299,8 +299,8 @@ static bool import_token(TlJsScanner *scanner, const TlToken *token, TlImportEdg
   return false;
 }
 
-static bool next_js_import(TlJsScanner *scanner, TlImportEdge *edge) {
-  TlToken token;
+static bool next_js_import(SlJsScanner *scanner, SlImportEdge *edge) {
+  SlToken token;
   while (next_js_token(scanner, &token)) {
     if (import_token(scanner, &token, edge)) return true;
   }
@@ -426,7 +426,7 @@ static bool decode_js_escape(const char **cursor, const char *end, char **output
   return true;
 }
 
-static char *decode_js_literal(const TlImportEdge *edge) {
+static char *decode_js_literal(const SlImportEdge *edge) {
   const size_t length = (size_t)(edge->end - edge->specifier);
   char *decoded = malloc(length + 1);
   if (!decoded) return NULL;
@@ -446,20 +446,20 @@ static char *decode_js_literal(const TlImportEdge *edge) {
   return decoded;
 }
 
-static bool add_js_import(TlImportList *list, TlImportEdge *edge, size_t line, size_t column) {
+static bool add_js_import(SlImportList *list, SlImportEdge *edge, size_t line, size_t column) {
   char *specifier = decode_js_literal(edge);
   if (!specifier) return false;
-  const bool added = tl_import_list_add(list, specifier, line, column, TL_LANGUAGE_JAVASCRIPT);
+  const bool added = sl_import_list_add(list, specifier, line, column, SL_LANGUAGE_JAVASCRIPT);
   free(specifier);
   return added;
 }
 
-static bool parse_javascript(char *content, TlImportList *list) {
-  TlJsScanner scanner = {content, content, false, true};
+static bool parse_javascript(char *content, SlImportList *list) {
+  SlJsScanner scanner = {content, content, false, true};
   char *position = content;
   size_t line = 1;
   size_t column = 1;
-  TlImportEdge edge;
+  SlImportEdge edge;
   while (next_js_import(&scanner, &edge)) {
     advance_position(&position, edge.specifier, &line, &column);
     if (!add_js_import(list, &edge, line, column)) return false;
@@ -500,7 +500,7 @@ static bool write_python_prefix(char **output, size_t *remaining, size_t dots) {
 static bool python_specifier(const char *module, char *output) {
   size_t dots = 0;
   while (module[dots] == '.') dots += 1;
-  size_t remaining = TL_PATH_CAPACITY;
+  size_t remaining = SL_PATH_CAPACITY;
   char *cursor = output;
   if (!write_python_prefix(&cursor, &remaining, dots)) return false;
   for (const char *source = module + dots; *source; source += 1) {
@@ -512,7 +512,7 @@ static bool python_specifier(const char *module, char *output) {
   return true;
 }
 
-static bool add_python_from(char *line, char *statement, size_t line_number, TlImportList *list) {
+static bool add_python_from(char *line, char *statement, size_t line_number, SlImportList *list) {
   char *cursor = skip_horizontal_space(statement);
   if (!python_keyword(cursor, "from")) return true;
   cursor = skip_horizontal_space(cursor + strlen("from"));
@@ -522,22 +522,22 @@ static bool add_python_from(char *line, char *statement, size_t line_number, TlI
   if (cursor == module || !python_keyword(after, "import")) return true;
   const char saved = *cursor;
   *cursor = '\0';
-  char specifier[TL_PATH_CAPACITY];
+  char specifier[SL_PATH_CAPACITY];
   const bool converted = python_specifier(module, specifier);
   *cursor = saved;
   const size_t column = (size_t)(module - line) + 1;
-  return converted && tl_import_list_add(list, specifier, line_number, column, TL_LANGUAGE_PYTHON);
+  return converted && sl_import_list_add(list, specifier, line_number, column, SL_LANGUAGE_PYTHON);
 }
 
 static bool add_python_module(char *line, char *module, char *end, size_t line_number,
-                              TlImportList *list) {
+                              SlImportList *list) {
   const char saved = *end;
   *end = '\0';
-  char specifier[TL_PATH_CAPACITY];
+  char specifier[SL_PATH_CAPACITY];
   const bool converted = python_specifier(module, specifier);
   *end = saved;
   const size_t column = (size_t)(module - line) + 1;
-  return converted && tl_import_list_add(list, specifier, line_number, column, TL_LANGUAGE_PYTHON);
+  return converted && sl_import_list_add(list, specifier, line_number, column, SL_LANGUAGE_PYTHON);
 }
 
 static char *skip_python_alias(char *cursor) {
@@ -548,7 +548,7 @@ static char *skip_python_alias(char *cursor) {
   return skip_horizontal_space(cursor);
 }
 
-static bool add_python_import(char *line, char *statement, size_t line_number, TlImportList *list) {
+static bool add_python_import(char *line, char *statement, size_t line_number, SlImportList *list) {
   char *cursor = skip_horizontal_space(statement);
   if (!python_keyword(cursor, "import")) return true;
   cursor = skip_horizontal_space(cursor + strlen("import"));
@@ -565,12 +565,12 @@ static bool add_python_import(char *line, char *statement, size_t line_number, T
 }
 
 static bool parse_python_statement(char *line, char *statement, size_t line_number,
-                                   TlImportList *list) {
+                                   SlImportList *list) {
   if (!add_python_from(line, statement, line_number, list)) return false;
   return add_python_import(line, statement, line_number, list);
 }
 
-static bool parse_python_line(char *line, size_t line_number, TlImportList *list) {
+static bool parse_python_line(char *line, size_t line_number, SlImportList *list) {
   char *statement = line;
   while (*statement) {
     char *separator = strchr(statement, ';');
@@ -585,7 +585,7 @@ static bool parse_python_line(char *line, size_t line_number, TlImportList *list
 
 typedef struct {
   char triple_quote;
-} TlPythonState;
+} SlPythonState;
 
 static bool python_quote_character(char character) { return character == '\'' || character == '"'; }
 
@@ -599,7 +599,7 @@ static char *mask_python_escape(char *cursor) {
   return cursor;
 }
 
-static char *mask_python_triple(char *cursor, TlPythonState *state) {
+static char *mask_python_triple(char *cursor, SlPythonState *state) {
   while (*cursor) {
     if (*cursor == '\\') {
       cursor = mask_python_escape(cursor);
@@ -632,7 +632,7 @@ static char *mask_python_quoted(char *cursor) {
   return cursor;
 }
 
-static void mask_python_line(char *line, TlPythonState *state) {
+static void mask_python_line(char *line, SlPythonState *state) {
   char *cursor = line;
   while (*cursor) {
     if (state->triple_quote) {
@@ -657,13 +657,13 @@ static void mask_python_line(char *line, TlPythonState *state) {
   }
 }
 
-static bool parse_python(char *content, TlImportList *list) {
+static bool parse_python(char *content, SlImportList *list) {
   char *code = duplicate_string(content);
   if (!code) return false;
   char *line = code;
   size_t line_number = 1;
   bool parsed = true;
-  TlPythonState state = {0};
+  SlPythonState state = {0};
   while (*line) {
     char *next = strchr(line, '\n');
     if (next) *next = '\0';
@@ -680,9 +680,9 @@ static bool parse_python(char *content, TlImportList *list) {
 typedef struct {
   bool block_comment;
   bool raw_string;
-} TlCState;
+} SlCState;
 
-static char *mask_c_block_comment(char *cursor, TlCState *state) {
+static char *mask_c_block_comment(char *cursor, SlCState *state) {
   while (*cursor) {
     const bool closes = cursor[0] == '*' && cursor[1] == '/';
     if (closes) {
@@ -702,7 +702,7 @@ static char *mask_to_line_end(char *cursor) {
   return cursor + length;
 }
 
-static char *mask_go_raw_string(char *cursor, TlCState *state) {
+static char *mask_go_raw_string(char *cursor, SlCState *state) {
   char *end = strchr(cursor, '`');
   if (!end) return mask_to_line_end(cursor);
   memset(cursor, ' ', (size_t)(end - cursor) + 1);
@@ -710,13 +710,13 @@ static char *mask_go_raw_string(char *cursor, TlCState *state) {
   return end + 1;
 }
 
-static bool start_go_raw_string(char *cursor, TlCState *state) {
+static bool start_go_raw_string(char *cursor, SlCState *state) {
   if (*cursor != '`' || strchr(cursor + 1, '`')) return false;
   state->raw_string = true;
   return true;
 }
 
-static void mask_c_comments(char *line, TlCState *state, bool track_raw_strings) {
+static void mask_c_comments(char *line, SlCState *state, bool track_raw_strings) {
   char *cursor = line;
   while (*cursor) {
     if (state->raw_string) {
@@ -752,8 +752,8 @@ static char *find_import_quote(char *cursor) {
   return NULL;
 }
 
-static bool add_quoted_specifier(char *line, char *cursor, size_t line_number, TlLanguage language,
-                                 TlImportList *list) {
+static bool add_quoted_specifier(char *line, char *cursor, size_t line_number, SlLanguage language,
+                                 SlImportList *list) {
   char *quote = find_import_quote(cursor);
   if (!quote) return true;
   char *end = quoted_end(quote);
@@ -761,32 +761,32 @@ static bool add_quoted_specifier(char *line, char *cursor, size_t line_number, T
   const char saved = *end;
   *end = '\0';
   const size_t column = (size_t)(quote - line) + 2;
-  const bool added = tl_import_list_add(list, quote + 1, line_number, column, language);
+  const bool added = sl_import_list_add(list, quote + 1, line_number, column, language);
   *end = saved;
   return added;
 }
 
-static bool parse_go_line(char *line, size_t line_number, bool *block, TlImportList *list) {
+static bool parse_go_line(char *line, size_t line_number, bool *block, SlImportList *list) {
   char *cursor = skip_horizontal_space(line);
   if (*block && *cursor == ')') {
     *block = false;
     return true;
   }
-  if (*block) return add_quoted_specifier(line, cursor, line_number, TL_LANGUAGE_GO, list);
+  if (*block) return add_quoted_specifier(line, cursor, line_number, SL_LANGUAGE_GO, list);
   if (!python_keyword(cursor, "import")) return true;
   cursor = skip_horizontal_space(cursor + strlen("import"));
-  if (*cursor != '(') return add_quoted_specifier(line, cursor, line_number, TL_LANGUAGE_GO, list);
+  if (*cursor != '(') return add_quoted_specifier(line, cursor, line_number, SL_LANGUAGE_GO, list);
   *block = true;
-  return add_quoted_specifier(line, cursor + 1, line_number, TL_LANGUAGE_GO, list);
+  return add_quoted_specifier(line, cursor + 1, line_number, SL_LANGUAGE_GO, list);
 }
 
-static bool parse_go(char *content, TlImportList *list) {
+static bool parse_go(char *content, SlImportList *list) {
   char *code = duplicate_string(content);
   if (!code) return false;
   char *line = code;
   size_t line_number = 1;
   bool block = false;
-  TlCState state = {0};
+  SlCState state = {0};
   bool parsed = true;
   while (*line) {
     char *next = strchr(line, '\n');
@@ -807,20 +807,20 @@ static char *skip_proto_modifier(char *cursor) {
   return skip_horizontal_space(cursor);
 }
 
-static bool parse_proto_line(char *line, size_t line_number, TlImportList *list) {
+static bool parse_proto_line(char *line, size_t line_number, SlImportList *list) {
   char *cursor = skip_horizontal_space(line);
   if (!python_keyword(cursor, "import")) return true;
   cursor = skip_horizontal_space(cursor + strlen("import"));
   cursor = skip_proto_modifier(cursor);
-  return add_quoted_specifier(line, cursor, line_number, TL_LANGUAGE_PROTO, list);
+  return add_quoted_specifier(line, cursor, line_number, SL_LANGUAGE_PROTO, list);
 }
 
-static bool parse_proto(char *content, TlImportList *list) {
+static bool parse_proto(char *content, SlImportList *list) {
   char *code = duplicate_string(content);
   if (!code) return false;
   char *line = code;
   size_t line_number = 1;
-  TlCState state = {0};
+  SlCState state = {0};
   bool parsed = true;
   while (*line) {
     char *next = strchr(line, '\n');
@@ -840,7 +840,7 @@ static bool path_has_extension(const char *path, const char *extension) {
   return actual && strcmp(actual, extension) == 0;
 }
 
-bool tl_parse_imports(const char *path, char *content, TlImportList *list) {
+bool sl_parse_imports(const char *path, char *content, SlImportList *list) {
   if (path_has_extension(path, ".py")) return parse_python(content, list);
   if (path_has_extension(path, ".go")) return parse_go(content, list);
   if (path_has_extension(path, ".proto")) return parse_proto(content, list);

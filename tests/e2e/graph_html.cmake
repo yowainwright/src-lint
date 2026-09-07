@@ -13,7 +13,7 @@ set(required
   "<!doctype html>"
   "<script id=\"graph-data\" type=\"application/json\">"
   "services/orders/create.ts"
-  "TL1001"
+  "SL1001"
   "id=\"boundary-filter\""
   "id=\"graph-canvas\""
 )

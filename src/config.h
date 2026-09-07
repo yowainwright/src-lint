@@ -1,26 +1,26 @@
-#ifndef TREE_LEGIBILITY_CONFIG_H
-#define TREE_LEGIBILITY_CONFIG_H
+#ifndef SRC_LINT_CONFIG_H
+#define SRC_LINT_CONFIG_H
 
 #include "internal.h"
 
 #include <stdint.h>
 #include <stdio.h>
 
-#define TL_DEFAULT_CACHE_BYTES (8U * 1024U * 1024U)
+#define SL_DEFAULT_CACHE_BYTES (8U * 1024U * 1024U)
 
 typedef struct {
   char **items;
   size_t count;
   bool set;
-} TlPatternList;
+} SlPatternList;
 
 typedef struct {
   char *name;
   char *root;
   bool root_set;
-  TlPatternList public_entries;
-  TlPatternList allow;
-} TlBoundaryConfig;
+  SlPatternList public_entries;
+  SlPatternList allow;
+} SlBoundaryConfig;
 
 typedef struct {
   bool present;
@@ -30,19 +30,19 @@ typedef struct {
   bool strict_set;
   size_t cache_max_bytes;
   bool cache_set;
-  char repository_root[TL_PATH_CAPACITY];
-  TlBoundaryConfig *boundaries;
+  char repository_root[SL_PATH_CAPACITY];
+  SlBoundaryConfig *boundaries;
   size_t boundary_count;
   size_t boundary_capacity;
-} TlConfig;
+} SlConfig;
 
-void tl_config_init(TlConfig *config);
-void tl_config_free(TlConfig *config);
-bool tl_config_load_for_file(const char *file_path, TlConfig *config, FILE *errors);
-bool tl_config_boundary_for_path(const TlConfig *config, const char *path,
-                                 const TlBoundaryConfig **boundary, const char **inside);
-bool tl_config_public_entry(const TlBoundaryConfig *boundary, const char *inside);
-bool tl_config_allowed_target(const TlBoundaryConfig *boundary, const char *target);
-uint64_t tl_config_hash(const TlConfig *config);
+void sl_config_init(SlConfig *config);
+void sl_config_free(SlConfig *config);
+bool sl_config_load_for_file(const char *file_path, SlConfig *config, FILE *errors);
+bool sl_config_boundary_for_path(const SlConfig *config, const char *path,
+                                 const SlBoundaryConfig **boundary, const char **inside);
+bool sl_config_public_entry(const SlBoundaryConfig *boundary, const char *inside);
+bool sl_config_allowed_target(const SlBoundaryConfig *boundary, const char *target);
+uint64_t sl_config_hash(const SlConfig *config);
 
 #endif

@@ -14,23 +14,23 @@ static char *duplicate_optional(const char *value) {
   return value ? duplicate_string(value) : NULL;
 }
 
-static TlGraphNode *find_node(TlGraph *graph, const char *id) {
+static SlGraphNode *find_node(SlGraph *graph, const char *id) {
   for (size_t index = 0; index < graph->node_count; index += 1) {
     if (strcmp(graph->nodes[index].id, id) == 0) return &graph->nodes[index];
   }
   return NULL;
 }
 
-static bool grow_nodes(TlGraph *graph) {
+static bool grow_nodes(SlGraph *graph) {
   const size_t capacity = graph->node_capacity == 0 ? 16 : graph->node_capacity * 2;
-  TlGraphNode *nodes = realloc(graph->nodes, capacity * sizeof(*nodes));
+  SlGraphNode *nodes = realloc(graph->nodes, capacity * sizeof(*nodes));
   if (!nodes) return false;
   graph->nodes = nodes;
   graph->node_capacity = capacity;
   return true;
 }
 
-static bool set_boundary(TlGraphNode *node, const char *boundary) {
+static bool set_boundary(SlGraphNode *node, const char *boundary) {
   if (node->boundary[0] != '\0' || boundary[0] == '\0') return true;
   char *copy = duplicate_string(boundary);
   if (!copy) return false;
@@ -39,8 +39,8 @@ static bool set_boundary(TlGraphNode *node, const char *boundary) {
   return true;
 }
 
-bool tl_graph_add_node(TlGraph *graph, const char *id, const char *boundary) {
-  TlGraphNode *existing = find_node(graph, id);
+bool sl_graph_add_node(SlGraph *graph, const char *id, const char *boundary) {
+  SlGraphNode *existing = find_node(graph, id);
   if (existing) return set_boundary(existing, boundary);
   if (graph->node_count == graph->node_capacity && !grow_nodes(graph)) return false;
   char *id_copy = duplicate_string(id);
@@ -50,20 +50,20 @@ bool tl_graph_add_node(TlGraph *graph, const char *id, const char *boundary) {
     free(boundary_copy);
     return false;
   }
-  graph->nodes[graph->node_count++] = (TlGraphNode){id_copy, boundary_copy};
+  graph->nodes[graph->node_count++] = (SlGraphNode){id_copy, boundary_copy};
   return true;
 }
 
-static bool grow_edges(TlGraph *graph) {
+static bool grow_edges(SlGraph *graph) {
   const size_t capacity = graph->edge_capacity == 0 ? 32 : graph->edge_capacity * 2;
-  TlGraphEdge *edges = realloc(graph->edges, capacity * sizeof(*edges));
+  SlGraphEdge *edges = realloc(graph->edges, capacity * sizeof(*edges));
   if (!edges) return false;
   graph->edges = edges;
   graph->edge_capacity = capacity;
   return true;
 }
 
-static void free_edge(TlGraphEdge *edge) {
+static void free_edge(SlGraphEdge *edge) {
   free(edge->from);
   free(edge->to);
   free(edge->rule);
@@ -72,7 +72,7 @@ static void free_edge(TlGraphEdge *edge) {
   free(edge->suggested_public_entry);
 }
 
-static bool edge_copy_valid(const TlGraphEdgeInput *input, const TlGraphEdge *edge) {
+static bool edge_copy_valid(const SlGraphEdgeInput *input, const SlGraphEdge *edge) {
   if (!edge->from || !edge->to) return false;
   if (input->rule && !edge->rule) return false;
   if (input->source_boundary && !edge->source_boundary) return false;
@@ -80,8 +80,8 @@ static bool edge_copy_valid(const TlGraphEdgeInput *input, const TlGraphEdge *ed
   return !input->suggested_public_entry || edge->suggested_public_entry;
 }
 
-static TlGraphEdge copy_edge(const TlGraphEdgeInput *input) {
-  return (TlGraphEdge){duplicate_string(input->from),
+static SlGraphEdge copy_edge(const SlGraphEdgeInput *input) {
+  return (SlGraphEdge){duplicate_string(input->from),
                        duplicate_string(input->to),
                        input->line,
                        input->column,
@@ -93,9 +93,9 @@ static TlGraphEdge copy_edge(const TlGraphEdgeInput *input) {
                        duplicate_optional(input->suggested_public_entry)};
 }
 
-bool tl_graph_add_edge(TlGraph *graph, const TlGraphEdgeInput *input) {
+bool sl_graph_add_edge(SlGraph *graph, const SlGraphEdgeInput *input) {
   if (graph->edge_count == graph->edge_capacity && !grow_edges(graph)) return false;
-  TlGraphEdge edge = copy_edge(input);
+  SlGraphEdge edge = copy_edge(input);
   if (!edge_copy_valid(input, &edge)) {
     free_edge(&edge);
     return false;
@@ -104,24 +104,24 @@ bool tl_graph_add_edge(TlGraph *graph, const TlGraphEdgeInput *input) {
   return true;
 }
 
-static TlDiscoveredBoundary *find_boundary(TlGraph *graph, const char *name, const char *root) {
+static SlDiscoveredBoundary *find_boundary(SlGraph *graph, const char *name, const char *root) {
   for (size_t index = 0; index < graph->boundary_count; index += 1) {
-    TlDiscoveredBoundary *boundary = &graph->boundaries[index];
+    SlDiscoveredBoundary *boundary = &graph->boundaries[index];
     if (strcmp(boundary->name, name) == 0 && strcmp(boundary->root, root) == 0) return boundary;
   }
   return NULL;
 }
 
-static bool grow_boundaries(TlGraph *graph) {
+static bool grow_boundaries(SlGraph *graph) {
   const size_t capacity = graph->boundary_capacity == 0 ? 8 : graph->boundary_capacity * 2;
-  TlDiscoveredBoundary *items = realloc(graph->boundaries, capacity * sizeof(*items));
+  SlDiscoveredBoundary *items = realloc(graph->boundaries, capacity * sizeof(*items));
   if (!items) return false;
   graph->boundaries = items;
   graph->boundary_capacity = capacity;
   return true;
 }
 
-static bool append_boundary(TlGraph *graph, const char *name, const char *root,
+static bool append_boundary(SlGraph *graph, const char *name, const char *root,
                             const char *source) {
   char *name_copy = duplicate_string(name);
   char *root_copy = duplicate_string(root);
@@ -132,13 +132,13 @@ static bool append_boundary(TlGraph *graph, const char *name, const char *root,
     free(source_copy);
     return false;
   }
-  TlDiscoveredBoundary item = {name_copy, root_copy, source_copy, 1};
+  SlDiscoveredBoundary item = {name_copy, root_copy, source_copy, 1};
   graph->boundaries[graph->boundary_count++] = item;
   return true;
 }
 
-bool tl_graph_add_boundary(TlGraph *graph, const char *name, const char *root, const char *source) {
-  TlDiscoveredBoundary *existing = find_boundary(graph, name, root);
+bool sl_graph_add_boundary(SlGraph *graph, const char *name, const char *root, const char *source) {
+  SlDiscoveredBoundary *existing = find_boundary(graph, name, root);
   if (existing) {
     existing->files += 1;
     return true;
@@ -185,14 +185,14 @@ static void write_json_string(FILE *output, const char *value) {
 }
 
 static int compare_nodes(const void *left, const void *right) {
-  const TlGraphNode *left_node = left;
-  const TlGraphNode *right_node = right;
+  const SlGraphNode *left_node = left;
+  const SlGraphNode *right_node = right;
   return strcmp(left_node->id, right_node->id);
 }
 
 static int compare_edges(const void *left, const void *right) {
-  const TlGraphEdge *left_edge = left;
-  const TlGraphEdge *right_edge = right;
+  const SlGraphEdge *left_edge = left;
+  const SlGraphEdge *right_edge = right;
   const int from = strcmp(left_edge->from, right_edge->from);
   if (from != 0) return from;
   if (left_edge->line != right_edge->line) return left_edge->line < right_edge->line ? -1 : 1;
@@ -202,28 +202,28 @@ static int compare_edges(const void *left, const void *right) {
 }
 
 static int compare_boundaries(const void *left, const void *right) {
-  const TlDiscoveredBoundary *left_boundary = left;
-  const TlDiscoveredBoundary *right_boundary = right;
+  const SlDiscoveredBoundary *left_boundary = left;
+  const SlDiscoveredBoundary *right_boundary = right;
   const int name = strcmp(left_boundary->name, right_boundary->name);
   if (name != 0) return name;
   return strcmp(left_boundary->root, right_boundary->root);
 }
 
-static const char *language_name(TlLanguage language) {
-  if (language == TL_LANGUAGE_PYTHON) return "python";
-  if (language == TL_LANGUAGE_GO) return "go";
-  if (language == TL_LANGUAGE_PROTO) return "proto";
+static const char *language_name(SlLanguage language) {
+  if (language == SL_LANGUAGE_PYTHON) return "python";
+  if (language == SL_LANGUAGE_GO) return "go";
+  if (language == SL_LANGUAGE_PROTO) return "proto";
   return "javascript";
 }
 
-static const char *status_name(TlEdgeStatus status) {
-  if (status == TL_EDGE_ADVISORY) return "advisory";
-  if (status == TL_EDGE_VIOLATION) return "violation";
-  if (status == TL_EDGE_ERROR) return "error";
+static const char *status_name(SlEdgeStatus status) {
+  if (status == SL_EDGE_ADVISORY) return "advisory";
+  if (status == SL_EDGE_VIOLATION) return "violation";
+  if (status == SL_EDGE_ERROR) return "error";
   return "allowed";
 }
 
-static void write_node(FILE *output, const TlGraphNode *node, bool comma) {
+static void write_node(FILE *output, const SlGraphNode *node, bool comma) {
   fputs("    {\n      \"id\": ", output);
   write_json_string(output, node->id);
   fputs(",\n      \"boundary\": ", output);
@@ -245,7 +245,7 @@ static void write_edge_field(FILE *output, const char *name, const char *value, 
   fputs(comma ? ",\n" : "\n", output);
 }
 
-static void write_edge(FILE *output, const TlGraphEdge *edge, bool comma) {
+static void write_edge(FILE *output, const SlGraphEdge *edge, bool comma) {
   fputs("    {\n      \"from\": ", output);
   write_json_string(output, edge->from);
   fputs(",\n      \"to\": ", output);
@@ -264,7 +264,7 @@ static void write_edge(FILE *output, const TlGraphEdge *edge, bool comma) {
   fputs(comma ? "    },\n" : "    }\n", output);
 }
 
-bool tl_graph_write_json(TlGraph *graph, FILE *output) {
+bool sl_graph_write_json(SlGraph *graph, FILE *output) {
   if (graph->node_count > 1)
     qsort(graph->nodes, graph->node_count, sizeof(*graph->nodes), compare_nodes);
   if (graph->edge_count > 1)
@@ -281,7 +281,7 @@ bool tl_graph_write_json(TlGraph *graph, FILE *output) {
   return !ferror(output);
 }
 
-static void write_boundary(FILE *output, const TlDiscoveredBoundary *boundary, bool comma) {
+static void write_boundary(FILE *output, const SlDiscoveredBoundary *boundary, bool comma) {
   fputs("    {\n      \"name\": ", output);
   write_json_string(output, boundary->name);
   fputs(",\n      \"root\": ", output);
@@ -292,12 +292,12 @@ static void write_boundary(FILE *output, const TlDiscoveredBoundary *boundary, b
   fputs(comma ? "    },\n" : "    }\n", output);
 }
 
-static void sort_boundaries(TlGraph *graph) {
+static void sort_boundaries(SlGraph *graph) {
   if (graph->boundary_count > 1)
     qsort(graph->boundaries, graph->boundary_count, sizeof(*graph->boundaries), compare_boundaries);
 }
 
-bool tl_graph_write_discovery_json(TlGraph *graph, FILE *output) {
+bool sl_graph_write_discovery_json(SlGraph *graph, FILE *output) {
   sort_boundaries(graph);
   fputs("{\n  \"boundaries\": [\n", output);
   for (size_t index = 0; index < graph->boundary_count; index += 1) {
@@ -307,10 +307,10 @@ bool tl_graph_write_discovery_json(TlGraph *graph, FILE *output) {
   return !ferror(output);
 }
 
-bool tl_graph_write_discovery_text(TlGraph *graph, FILE *output) {
+bool sl_graph_write_discovery_text(SlGraph *graph, FILE *output) {
   sort_boundaries(graph);
   for (size_t index = 0; index < graph->boundary_count; index += 1) {
-    const TlDiscoveredBoundary *boundary = &graph->boundaries[index];
+    const SlDiscoveredBoundary *boundary = &graph->boundaries[index];
     const char *unit = boundary->files == 1 ? "file" : "files";
     fprintf(output, "%s %s %s %zu %s\n", boundary->name, boundary->root, boundary->source,
             boundary->files, unit);
@@ -318,20 +318,20 @@ bool tl_graph_write_discovery_text(TlGraph *graph, FILE *output) {
   return !ferror(output);
 }
 
-static void free_nodes(TlGraph *graph) {
+static void free_nodes(SlGraph *graph) {
   for (size_t index = 0; index < graph->node_count; index += 1) {
     free(graph->nodes[index].id);
     free(graph->nodes[index].boundary);
   }
 }
 
-static void free_edges(TlGraph *graph) {
+static void free_edges(SlGraph *graph) {
   for (size_t index = 0; index < graph->edge_count; index += 1) {
     free_edge(&graph->edges[index]);
   }
 }
 
-static void free_boundaries(TlGraph *graph) {
+static void free_boundaries(SlGraph *graph) {
   for (size_t index = 0; index < graph->boundary_count; index += 1) {
     free(graph->boundaries[index].name);
     free(graph->boundaries[index].root);
@@ -339,12 +339,12 @@ static void free_boundaries(TlGraph *graph) {
   }
 }
 
-void tl_graph_free(TlGraph *graph) {
+void sl_graph_free(SlGraph *graph) {
   free_nodes(graph);
   free_edges(graph);
   free_boundaries(graph);
   free(graph->nodes);
   free(graph->edges);
   free(graph->boundaries);
-  *graph = (TlGraph){0};
+  *graph = (SlGraph){0};
 }

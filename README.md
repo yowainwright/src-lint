@@ -1,12 +1,10 @@
-# tree-legibility
+# src-lint
 
-Tree Legibility is a fast, standalone architecture-conformance linter for imports that cross intended service, component, package, or Proto boundaries.
+src-lint is a fast, standalone architecture-conformance linter for imports that cross intended service, component, package, or Proto boundaries.
 
 ## Boundary policy
 
-<!-- implemented languages and inferred boundary conventions from src/check.c and src/imports.c -->
-
-With no rc file, the CLI treats sibling directories under `services/<name>` as boundaries. Cross-service imports may target `api/`, `public/`, or `proto/`; direct traversal into other paths fails with `TL1001`.
+With no rc file, the CLI treats sibling directories under `services/<name>` as boundaries. Cross-service imports may target `api/`, `public/`, or `proto/`; direct traversal into other paths fails with `SL1001`.
 
 | Source | Imports recognized |
 | --- | --- |
@@ -15,13 +13,11 @@ With no rc file, the CLI treats sibling directories under `services/<name>` as b
 | Go | Single and grouped imports |
 | Proto | Regular, `public`, and `weak` imports |
 
-Explicit policy takes precedence over inference. Unresolved local imports are `TL2001` advisories by default and errors under `--strict`.
+Explicit policy takes precedence over inference. Unresolved local imports are `SL2001` advisories by default and errors under `--strict`.
 
 ## Examples
 
-<!-- default public boundary paths from src/check.c and import syntax from src/imports.c -->
-
-Cross-boundary imports should use an entry exposed through `api/`, `public/`, or `proto/`. Direct imports from an owner's internal implementation produce `TL1001`.
+Cross-boundary imports should use an entry exposed through `api/`, `public/`, or `proto/`. Direct imports from an owner's internal implementation produce `SL1001`.
 
 ### TypeScript and JavaScript
 
@@ -53,8 +49,6 @@ Cross-boundary imports should use an entry exposed through `api/`, `public/`, or
 
 ## Build
 
-<!-- build commands and sanitizer option matching CMakeLists.txt -->
-
 The executable is C11 and has no runtime dependency. POSIX `fts` and `realpath` are currently required.
 
 ```sh
@@ -63,26 +57,24 @@ cmake --build build --parallel
 ```
 
 ```sh
-cmake -S . -B build-asan -DTREE_LEGIBILITY_SANITIZERS=ON
+cmake -S . -B build-asan -DSRC_LINT_SANITIZERS=ON
 cmake --build build-asan --parallel
 ctest --test-dir build-asan --output-on-failure
 ```
 
 ## Usage
 
-<!-- CLI syntax, formats, and exit codes from src/main.c and include/tree_legibility/check.h -->
-
 ```text
-tree-legibility check [path] [--strict] [--format text|json]
-tree-legibility discover [path] [--format text|json]
-tree-legibility graph [path] [--format json|html]
+src-lint check [path] [--strict] [--format text|json]
+src-lint discover [path] [--format text|json]
+src-lint graph [path] [--format json|html]
 ```
 
 ```sh
-./build/tree-legibility check services/orders --strict --format json
-./build/tree-legibility discover . --format json
-./build/tree-legibility graph . --format json > dependency-graph.json
-./build/tree-legibility graph . --format html > dependency-graph.html
+./build/src-lint check services/orders --strict --format json
+./build/src-lint discover . --format json
+./build/src-lint graph . --format json > dependency-graph.json
+./build/src-lint graph . --format html > dependency-graph.html
 ```
 
 `discover` reports configured or inferred boundaries with source-file counts. JSON graph output contains deterministic nodes and edges. Violation edges carry source coordinates, source and target ownership, the rule, and a suggested public entry. HTML output is a self-contained boundary filter and pan-and-zoom dependency canvas.
@@ -91,14 +83,12 @@ Exit code `0` means clean, `1` means policy findings exist, and `2` means invali
 
 ## Configuration
 
-<!-- rc filenames, schema, defaults, and inheritance from src/config.c and src/config.h -->
-
 Place one rc file at the repository root:
 
-- `.tree-legibilityrc.toml`
-- `.tree-legibilityrc.json`
-- `.tree-legibilityrc.yaml`
-- `.tree-legibilityrc.yml`
+- `.src-lintrc.toml`
+- `.src-lintrc.json`
+- `.src-lintrc.yaml`
+- `.src-lintrc.yml`
 
 All formats use the same model. More than one recognized rc file in a directory is invalid.
 
@@ -124,9 +114,7 @@ A nested rc file inherits its ancestors within the repository. Boundary maps mer
 
 ## Cache
 
-<!-- cache location, key inputs, default limit, and eviction from src/cache.c and src/config.h -->
-
-Parsed imports are cached per repository in `.tree-legibility/cache/`. The default hard limit is 8 MiB; `cache.max_mib = 0` disables it.
+Parsed imports are cached per repository in `.src-lint/cache/`. The default hard limit is 8 MiB; `cache.max_mib = 0` disables it.
 
 Keys include tool, parser, and cache versions, effective configuration, file path, and source content. Least-recently-used records are trimmed by stored bytes. The cache is safe to delete and ignored by the supplied [`.gitignore`](.gitignore).
 
@@ -134,15 +122,16 @@ Release tests generate a 10,000-file repository and enforce the 10 ms startup an
 
 ## Development
 
-<!-- test command and test registration matching CMakeLists.txt and tests/CMakeLists.txt -->
-
-Install the repository's versioned Git hooks for commit and push checks:
+Install contributor tools and the repository's versioned Git hooks:
 
 ```sh
-./scripts/install-git-hooks.sh
+brew bundle
+./scripts/setup.sh
 ```
 
-The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The pre-push hook runs the Release and sanitizer suites. Hook updates take effect from `.githooks` without reinstalling.
+`scripts/setup.sh` generates `.git/hooks/` from the tracked sources in `scripts/hooks/`. It updates only changed hooks and exits without writing when they are current. It migrates the local `.githooks` setting but rejects other `core.hooksPath` settings without changing them.
+
+The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The post-merge hook refreshes installed hooks and warns when contributor tools are missing. The pre-push hook checks GitHub Actions dependency policy with Codependence, then runs the Release and sanitizer suites.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -152,15 +141,19 @@ ctest --test-dir build --output-on-failure
 
 CLI-level fixtures cover each adapter, zero-config and configured policy, rc parity and inheritance, strict advisories, cache reuse and limits, discovery, JSON, and HTML.
 
+Tests live in `tests/e2e/` and `tests/integration/`, which includes performance tests and `scripts/` for setup and hooks. Shared inputs and snapshots remain in `tests/fixtures/` and `tests/expected/`. Isolated unit tests belong in `tests/unit/` when added.
+
+CTest labels select a group, for example `ctest --test-dir build -L integration --output-on-failure`. Other labels are `e2e`, `scripts`, and `performance`; performance tests require a Release build.
+
 ## Competitive landscape
 
-Tree Legibility turns intended dependency boundaries into executable policy. It protects service, component, package, and Proto ownership from accidental changes by humans and AI.
+src-lint turns intended dependency boundaries into executable policy. It protects service, component, package, and Proto ownership from accidental changes by humans and AI.
 
 Its focus is a fast, local, polyglot intent graph with advisory discovery, deterministic enforcement, and progressive visualization.
 
 _Landscape reviewed July 2026._
 
-| Reference | Existing strength | Tree Legibility's intended distinction |
+| Reference | Existing strength | src-lint's intended distinction |
 | --- | --- | --- |
 | [archlint](https://github.com/muhammetsafak/archlint) | Import boundaries for Go, TypeScript, and Python; bounded contexts; public ports; executable ADRs | AST-backed analysis, Proto support, nested provider-owned boundaries, advisory discovery, and an interactive graph |
 | [structurelint](https://github.com/Jonathangadeaharder/structurelint) | Polyglot import graphs, architectural layers, cascading configuration, and automatic project detection | A focused architecture-conformance tool with monorepo semantics, explicit public entries, and boundary ownership |

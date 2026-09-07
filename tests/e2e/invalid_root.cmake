@@ -7,7 +7,7 @@ execute_process(
   ERROR_VARIABLE errors
 )
 
-set(prefix "tree-legibility: cannot scan ")
+set(prefix "src-lint: cannot scan ")
 set(expected "${prefix}${missing}\n")
 
 if(NOT result EQUAL 2)

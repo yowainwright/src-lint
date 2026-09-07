@@ -1,33 +1,33 @@
-#ifndef TREE_LEGIBILITY_CACHE_H
-#define TREE_LEGIBILITY_CACHE_H
+#ifndef SRC_LINT_CACHE_H
+#define SRC_LINT_CACHE_H
 
 #include "config.h"
 #include "internal.h"
 
 typedef struct {
-  char directory[TL_PATH_CAPACITY];
+  char directory[SL_PATH_CAPACITY];
   size_t max_bytes;
   size_t tracked_bytes;
   uint64_t config_hash;
   int lock_fd;
   bool enabled;
-} TlCache;
+} SlCache;
 
 typedef struct {
-  TlCache *items;
+  SlCache *items;
   size_t count;
   size_t capacity;
-} TlCacheSet;
+} SlCacheSet;
 
-bool tl_cache_init(TlCache *cache, const TlConfig *config, const char *source_path,
+bool sl_cache_init(SlCache *cache, const SlConfig *config, const char *source_path,
                    const char *scan_root);
-bool tl_cache_load(TlCache *cache, const char *source_path, const char *content,
-                   TlImportList *imports);
-size_t tl_cache_store(TlCache *cache, const char *source_path, const char *content,
-                      const TlImportList *imports);
-bool tl_cache_set_add(TlCacheSet *set, const TlCache *cache);
-void tl_cache_set_record(TlCacheSet *set, const TlCache *cache, size_t bytes);
-bool tl_cache_set_trim(TlCacheSet *set);
-void tl_cache_set_free(TlCacheSet *set);
+bool sl_cache_load(SlCache *cache, const char *source_path, const char *content,
+                   SlImportList *imports);
+size_t sl_cache_store(SlCache *cache, const char *source_path, const char *content,
+                      const SlImportList *imports);
+bool sl_cache_set_add(SlCacheSet *set, const SlCache *cache);
+void sl_cache_set_record(SlCacheSet *set, const SlCache *cache, size_t bytes);
+bool sl_cache_set_trim(SlCacheSet *set);
+void sl_cache_set_free(SlCacheSet *set);
 
 #endif

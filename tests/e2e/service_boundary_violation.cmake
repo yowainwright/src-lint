@@ -21,7 +21,7 @@ endif()
 
 set(location "services/orders/create.ts")
 set(position ":1:28")
-set(finding " TL1001 orders cannot import billing internals")
+set(finding " SL1001 orders cannot import billing internals")
 set(target " -> services/billing/internal/ledger.ts")
 set(expected "${location}${position}${finding}${target}")
 

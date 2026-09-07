@@ -6,37 +6,37 @@
 #include <string.h>
 #include <sys/stat.h>
 
-typedef enum { TL_CONFIG_ROOT, TL_CONFIG_CACHE, TL_CONFIG_BOUNDARY } TlConfigSection;
+typedef enum { SL_CONFIG_ROOT, SL_CONFIG_CACHE, SL_CONFIG_BOUNDARY } SlConfigSection;
 
 typedef struct {
-  TlConfigSection section;
-  TlBoundaryConfig *boundary;
-} TlTomlState;
+  SlConfigSection section;
+  SlBoundaryConfig *boundary;
+} SlTomlState;
 
 typedef struct {
   char **items;
   size_t count;
   size_t capacity;
-} TlPathList;
+} SlPathList;
 
 typedef struct {
   char *start;
   char *cursor;
-} TlJsonParser;
+} SlJsonParser;
 
 typedef enum {
-  TL_YAML_ROOT,
-  TL_YAML_CACHE,
-  TL_YAML_BOUNDARIES,
-  TL_YAML_BOUNDARY,
-  TL_YAML_PATTERNS
-} TlYamlSection;
+  SL_YAML_ROOT,
+  SL_YAML_CACHE,
+  SL_YAML_BOUNDARIES,
+  SL_YAML_BOUNDARY,
+  SL_YAML_PATTERNS
+} SlYamlSection;
 
 typedef struct {
-  TlYamlSection section;
-  TlBoundaryConfig *boundary;
-  TlPatternList *patterns;
-} TlYamlState;
+  SlYamlSection section;
+  SlBoundaryConfig *boundary;
+  SlPatternList *patterns;
+} SlYamlState;
 
 static char *duplicate_string(const char *value) {
   const size_t length = strlen(value) + 1;
@@ -78,65 +78,65 @@ static char *read_file(const char *path) {
 }
 
 static void config_error(FILE *errors, const char *path, size_t line, const char *message) {
-  fprintf(errors, "tree-legibility: %s:%zu: %s\n", path, line, message);
+  fprintf(errors, "src-lint: %s:%zu: %s\n", path, line, message);
 }
 
-static void free_patterns(TlPatternList *patterns) {
+static void free_patterns(SlPatternList *patterns) {
   for (size_t index = 0; index < patterns->count; index += 1) free(patterns->items[index]);
   free(patterns->items);
-  *patterns = (TlPatternList){0};
+  *patterns = (SlPatternList){0};
 }
 
-void tl_config_init(TlConfig *config) {
-  *config = (TlConfig){0};
+void sl_config_init(SlConfig *config) {
+  *config = (SlConfig){0};
   config->version = 1;
-  config->cache_max_bytes = TL_DEFAULT_CACHE_BYTES;
+  config->cache_max_bytes = SL_DEFAULT_CACHE_BYTES;
 }
 
-static void free_boundary(TlBoundaryConfig *boundary) {
+static void free_boundary(SlBoundaryConfig *boundary) {
   free(boundary->name);
   free(boundary->root);
   free_patterns(&boundary->public_entries);
   free_patterns(&boundary->allow);
 }
 
-void tl_config_free(TlConfig *config) {
+void sl_config_free(SlConfig *config) {
   for (size_t index = 0; index < config->boundary_count; index += 1) {
     free_boundary(&config->boundaries[index]);
   }
   free(config->boundaries);
-  tl_config_init(config);
+  sl_config_init(config);
 }
 
-static bool grow_boundaries(TlConfig *config) {
+static bool grow_boundaries(SlConfig *config) {
   const size_t capacity = config->boundary_capacity == 0 ? 8 : config->boundary_capacity * 2;
-  TlBoundaryConfig *items = realloc(config->boundaries, capacity * sizeof(*items));
+  SlBoundaryConfig *items = realloc(config->boundaries, capacity * sizeof(*items));
   if (!items) return false;
   config->boundaries = items;
   config->boundary_capacity = capacity;
   return true;
 }
 
-static TlBoundaryConfig *find_boundary(TlConfig *config, const char *name) {
+static SlBoundaryConfig *find_boundary(SlConfig *config, const char *name) {
   for (size_t index = 0; index < config->boundary_count; index += 1) {
     if (strcmp(config->boundaries[index].name, name) == 0) return &config->boundaries[index];
   }
   return NULL;
 }
 
-static TlBoundaryConfig *add_boundary(TlConfig *config, const char *name) {
+static SlBoundaryConfig *add_boundary(SlConfig *config, const char *name) {
   const bool full = config->boundary_count == config->boundary_capacity;
   if (full && !grow_boundaries(config)) return NULL;
   char *copy = duplicate_string(name);
   if (!copy) return NULL;
-  TlBoundaryConfig *boundary = &config->boundaries[config->boundary_count++];
-  *boundary = (TlBoundaryConfig){0};
+  SlBoundaryConfig *boundary = &config->boundaries[config->boundary_count++];
+  *boundary = (SlBoundaryConfig){0};
   boundary->name = copy;
   return boundary;
 }
 
-static TlBoundaryConfig *get_boundary(TlConfig *config, const char *name) {
-  TlBoundaryConfig *boundary = find_boundary(config, name);
+static SlBoundaryConfig *get_boundary(SlConfig *config, const char *name) {
+  SlBoundaryConfig *boundary = find_boundary(config, name);
   return boundary ? boundary : add_boundary(config, name);
 }
 
@@ -246,7 +246,7 @@ static char *parse_string(const char *value) {
   return copy;
 }
 
-static bool add_pattern(TlPatternList *patterns, char *pattern) {
+static bool add_pattern(SlPatternList *patterns, char *pattern) {
   char **items = realloc(patterns->items, (patterns->count + 1) * sizeof(*items));
   if (!items) {
     free(pattern);
@@ -269,7 +269,7 @@ static char *toml_string_end(char *value) {
   return NULL;
 }
 
-static char *parse_pattern_item(char *cursor, TlPatternList *patterns) {
+static char *parse_pattern_item(char *cursor, SlPatternList *patterns) {
   char *end = toml_string_end(cursor);
   if (!end) return NULL;
   const char saved = *end;
@@ -280,7 +280,7 @@ static char *parse_pattern_item(char *cursor, TlPatternList *patterns) {
   return trim_left(end);
 }
 
-static bool parse_pattern_array(char *value, TlPatternList *patterns) {
+static bool parse_pattern_array(char *value, SlPatternList *patterns) {
   value = trim(value);
   const size_t length = strlen(value);
   if (length < 2 || value[0] != '[' || value[length - 1] != ']') return false;
@@ -298,7 +298,7 @@ static bool parse_pattern_array(char *value, TlPatternList *patterns) {
   return true;
 }
 
-static bool set_version(TlConfig *config, char *value) {
+static bool set_version(SlConfig *config, char *value) {
   size_t version;
   if (!parse_unsigned(value, &version) || version != 1) return false;
   config->version = (unsigned)version;
@@ -306,19 +306,19 @@ static bool set_version(TlConfig *config, char *value) {
   return true;
 }
 
-static bool set_strict(TlConfig *config, char *value) {
+static bool set_strict(SlConfig *config, char *value) {
   if (!parse_bool(value, &config->strict)) return false;
   config->strict_set = true;
   return true;
 }
 
-static bool set_root_value(TlConfig *config, const char *key, char *value) {
+static bool set_root_value(SlConfig *config, const char *key, char *value) {
   if (strcmp(key, "version") == 0) return set_version(config, value);
   if (strcmp(key, "strict") == 0) return set_strict(config, value);
   return false;
 }
 
-static bool set_cache_value(TlConfig *config, const char *key, char *value) {
+static bool set_cache_value(SlConfig *config, const char *key, char *value) {
   if (strcmp(key, "max_mib") != 0) return false;
   size_t max_mib;
   if (!parse_unsigned(value, &max_mib) || max_mib > SIZE_MAX / (1024U * 1024U)) return false;
@@ -327,7 +327,7 @@ static bool set_cache_value(TlConfig *config, const char *key, char *value) {
   return true;
 }
 
-static bool set_boundary_root(TlBoundaryConfig *boundary, char *value) {
+static bool set_boundary_root(SlBoundaryConfig *boundary, char *value) {
   char *root = parse_string(value);
   if (!root) return false;
   free(boundary->root);
@@ -336,46 +336,46 @@ static bool set_boundary_root(TlBoundaryConfig *boundary, char *value) {
   return true;
 }
 
-static bool set_boundary_value(TlBoundaryConfig *boundary, const char *key, char *value) {
+static bool set_boundary_value(SlBoundaryConfig *boundary, const char *key, char *value) {
   if (strcmp(key, "root") == 0) return set_boundary_root(boundary, value);
   if (strcmp(key, "public") == 0) return parse_pattern_array(value, &boundary->public_entries);
   if (strcmp(key, "allow") == 0) return parse_pattern_array(value, &boundary->allow);
   return false;
 }
 
-static bool parse_boundary_section(char *name, TlConfig *config, TlTomlState *state) {
+static bool parse_boundary_section(char *name, SlConfig *config, SlTomlState *state) {
   const char *prefix = "boundaries.";
   if (strncmp(name, prefix, strlen(prefix)) != 0) return false;
   const char *boundary_name = name + strlen(prefix);
   if (*boundary_name == '\0') return false;
-  state->section = TL_CONFIG_BOUNDARY;
+  state->section = SL_CONFIG_BOUNDARY;
   state->boundary = get_boundary(config, boundary_name);
   return state->boundary != NULL;
 }
 
-static bool parse_section(char *line, TlConfig *config, TlTomlState *state) {
+static bool parse_section(char *line, SlConfig *config, SlTomlState *state) {
   const size_t length = strlen(line);
   if (length < 3 || line[0] != '[' || line[length - 1] != ']') return false;
   line[length - 1] = '\0';
   char *name = trim(line + 1);
   if (strcmp(name, "cache") != 0) return parse_boundary_section(name, config, state);
-  state->section = TL_CONFIG_CACHE;
+  state->section = SL_CONFIG_CACHE;
   state->boundary = NULL;
   return true;
 }
 
-static bool apply_toml_value(TlConfig *config, TlTomlState *state, char *line) {
+static bool apply_toml_value(SlConfig *config, SlTomlState *state, char *line) {
   char *equals = strchr(line, '=');
   if (!equals) return false;
   *equals = '\0';
   char *key = trim(line);
   char *value = trim(equals + 1);
-  if (state->section == TL_CONFIG_ROOT) return set_root_value(config, key, value);
-  if (state->section == TL_CONFIG_CACHE) return set_cache_value(config, key, value);
+  if (state->section == SL_CONFIG_ROOT) return set_root_value(config, key, value);
+  if (state->section == SL_CONFIG_CACHE) return set_cache_value(config, key, value);
   return state->boundary && set_boundary_value(state->boundary, key, value);
 }
 
-static bool parse_toml_line(char *line, TlConfig *config, TlTomlState *state) {
+static bool parse_toml_line(char *line, SlConfig *config, SlTomlState *state) {
   strip_config_comment(line);
   line = trim(line);
   if (*line == '\0') return true;
@@ -383,8 +383,8 @@ static bool parse_toml_line(char *line, TlConfig *config, TlTomlState *state) {
   return apply_toml_value(config, state, line);
 }
 
-static bool parse_toml(const char *path, char *content, TlConfig *config, FILE *errors) {
-  TlTomlState state = {TL_CONFIG_ROOT, NULL};
+static bool parse_toml(const char *path, char *content, SlConfig *config, FILE *errors) {
+  SlTomlState state = {SL_CONFIG_ROOT, NULL};
   char *line = content;
   size_t line_number = 1;
   while (*line) {
@@ -402,14 +402,14 @@ static bool parse_toml(const char *path, char *content, TlConfig *config, FILE *
   return true;
 }
 
-static void json_skip_space(TlJsonParser *parser) {
+static void json_skip_space(SlJsonParser *parser) {
   while (*parser->cursor == ' ' || *parser->cursor == '\t' || *parser->cursor == '\r' ||
          *parser->cursor == '\n') {
     parser->cursor += 1;
   }
 }
 
-static bool json_take(TlJsonParser *parser, char expected) {
+static bool json_take(SlJsonParser *parser, char expected) {
   json_skip_space(parser);
   if (*parser->cursor != expected) return false;
   parser->cursor += 1;
@@ -484,7 +484,7 @@ static bool decode_json_escape(const char **cursor, char **output) {
   return true;
 }
 
-static char *decode_json_string(TlJsonParser *parser, char *value) {
+static char *decode_json_string(SlJsonParser *parser, char *value) {
   const char *cursor = parser->cursor + 1;
   char *output = value;
   while (*cursor && *cursor != '"') {
@@ -500,7 +500,7 @@ static char *decode_json_string(TlJsonParser *parser, char *value) {
   return value;
 }
 
-static char *json_string(TlJsonParser *parser) {
+static char *json_string(SlJsonParser *parser) {
   json_skip_space(parser);
   if (*parser->cursor != '"') return NULL;
   char *value = malloc(strlen(parser->cursor));
@@ -510,7 +510,7 @@ static char *json_string(TlJsonParser *parser) {
   return NULL;
 }
 
-static bool json_boolean(TlJsonParser *parser, bool *value) {
+static bool json_boolean(SlJsonParser *parser, bool *value) {
   json_skip_space(parser);
   if (strncmp(parser->cursor, "true", 4) == 0) {
     parser->cursor += 4;
@@ -523,7 +523,7 @@ static bool json_boolean(TlJsonParser *parser, bool *value) {
   return true;
 }
 
-static bool json_unsigned(TlJsonParser *parser, size_t *value) {
+static bool json_unsigned(SlJsonParser *parser, size_t *value) {
   json_skip_space(parser);
   const char first = parser->cursor[0];
   if (first < '0' || first > '9') return false;
@@ -538,7 +538,7 @@ static bool json_unsigned(TlJsonParser *parser, size_t *value) {
   return true;
 }
 
-static bool json_more(TlJsonParser *parser, bool *done) {
+static bool json_more(SlJsonParser *parser, bool *done) {
   json_skip_space(parser);
   if (*parser->cursor == '}') {
     parser->cursor += 1;
@@ -551,7 +551,7 @@ static bool json_more(TlJsonParser *parser, bool *done) {
   return true;
 }
 
-static bool json_array_more(TlJsonParser *parser, bool *done) {
+static bool json_array_more(SlJsonParser *parser, bool *done) {
   json_skip_space(parser);
   if (*parser->cursor == ']') {
     parser->cursor += 1;
@@ -564,7 +564,7 @@ static bool json_array_more(TlJsonParser *parser, bool *done) {
   return true;
 }
 
-static bool json_pattern_array(TlJsonParser *parser, TlPatternList *patterns) {
+static bool json_pattern_array(SlJsonParser *parser, SlPatternList *patterns) {
   if (!json_take(parser, '[')) return false;
   free_patterns(patterns);
   patterns->set = true;
@@ -579,7 +579,7 @@ static bool json_pattern_array(TlJsonParser *parser, TlPatternList *patterns) {
   }
 }
 
-static bool replace_boundary_root(TlBoundaryConfig *boundary, char *root) {
+static bool replace_boundary_root(SlBoundaryConfig *boundary, char *root) {
   if (!root) return false;
   free(boundary->root);
   boundary->root = root;
@@ -587,7 +587,7 @@ static bool replace_boundary_root(TlBoundaryConfig *boundary, char *root) {
   return true;
 }
 
-static bool parse_json_boundary_value(TlJsonParser *parser, TlBoundaryConfig *boundary,
+static bool parse_json_boundary_value(SlJsonParser *parser, SlBoundaryConfig *boundary,
                                       const char *key) {
   if (strcmp(key, "root") == 0) return replace_boundary_root(boundary, json_string(parser));
   if (strcmp(key, "public") == 0) return json_pattern_array(parser, &boundary->public_entries);
@@ -595,7 +595,7 @@ static bool parse_json_boundary_value(TlJsonParser *parser, TlBoundaryConfig *bo
   return false;
 }
 
-static bool parse_json_boundary(TlJsonParser *parser, TlBoundaryConfig *boundary) {
+static bool parse_json_boundary(SlJsonParser *parser, SlBoundaryConfig *boundary) {
   if (!json_take(parser, '{')) return false;
   json_skip_space(parser);
   if (json_take(parser, '}')) return true;
@@ -611,13 +611,13 @@ static bool parse_json_boundary(TlJsonParser *parser, TlBoundaryConfig *boundary
   }
 }
 
-static bool parse_json_boundaries(TlJsonParser *parser, TlConfig *config) {
+static bool parse_json_boundaries(SlJsonParser *parser, SlConfig *config) {
   if (!json_take(parser, '{')) return false;
   json_skip_space(parser);
   if (json_take(parser, '}')) return true;
   while (true) {
     char *name = json_string(parser);
-    TlBoundaryConfig *boundary = name ? get_boundary(config, name) : NULL;
+    SlBoundaryConfig *boundary = name ? get_boundary(config, name) : NULL;
     const bool colon = boundary && json_take(parser, ':');
     const bool parsed = colon && parse_json_boundary(parser, boundary);
     free(name);
@@ -628,7 +628,7 @@ static bool parse_json_boundaries(TlJsonParser *parser, TlConfig *config) {
   }
 }
 
-static bool parse_json_cache_value(TlJsonParser *parser, TlConfig *config, const char *key) {
+static bool parse_json_cache_value(SlJsonParser *parser, SlConfig *config, const char *key) {
   if (strcmp(key, "max_mib") != 0) return false;
   size_t max_mib;
   if (!json_unsigned(parser, &max_mib) || max_mib > SIZE_MAX / (1024U * 1024U)) return false;
@@ -637,7 +637,7 @@ static bool parse_json_cache_value(TlJsonParser *parser, TlConfig *config, const
   return true;
 }
 
-static bool parse_json_cache(TlJsonParser *parser, TlConfig *config) {
+static bool parse_json_cache(SlJsonParser *parser, SlConfig *config) {
   if (!json_take(parser, '{')) return false;
   json_skip_space(parser);
   if (json_take(parser, '}')) return true;
@@ -653,7 +653,7 @@ static bool parse_json_cache(TlJsonParser *parser, TlConfig *config) {
   }
 }
 
-static bool parse_json_version(TlJsonParser *parser, TlConfig *config) {
+static bool parse_json_version(SlJsonParser *parser, SlConfig *config) {
   size_t version;
   if (!json_unsigned(parser, &version) || version != 1) return false;
   config->version = (unsigned)version;
@@ -661,13 +661,13 @@ static bool parse_json_version(TlJsonParser *parser, TlConfig *config) {
   return true;
 }
 
-static bool parse_json_strict(TlJsonParser *parser, TlConfig *config) {
+static bool parse_json_strict(SlJsonParser *parser, SlConfig *config) {
   if (!json_boolean(parser, &config->strict)) return false;
   config->strict_set = true;
   return true;
 }
 
-static bool parse_json_root_value(TlJsonParser *parser, TlConfig *config, const char *key) {
+static bool parse_json_root_value(SlJsonParser *parser, SlConfig *config, const char *key) {
   if (strcmp(key, "version") == 0) return parse_json_version(parser, config);
   if (strcmp(key, "strict") == 0) return parse_json_strict(parser, config);
   if (strcmp(key, "cache") == 0) return parse_json_cache(parser, config);
@@ -675,7 +675,7 @@ static bool parse_json_root_value(TlJsonParser *parser, TlConfig *config, const 
   return false;
 }
 
-static bool parse_json_members(TlJsonParser *parser, TlConfig *config) {
+static bool parse_json_members(SlJsonParser *parser, SlConfig *config) {
   json_skip_space(parser);
   if (json_take(parser, '}')) return true;
   while (true) {
@@ -690,7 +690,7 @@ static bool parse_json_members(TlJsonParser *parser, TlConfig *config) {
   }
 }
 
-static size_t json_line(const TlJsonParser *parser) {
+static size_t json_line(const SlJsonParser *parser) {
   size_t line = 1;
   for (const char *cursor = parser->start; cursor < parser->cursor; cursor += 1) {
     if (*cursor == '\n') line += 1;
@@ -698,8 +698,8 @@ static size_t json_line(const TlJsonParser *parser) {
   return line;
 }
 
-static bool parse_json(const char *path, char *content, TlConfig *config, FILE *errors) {
-  TlJsonParser parser = {content, content};
+static bool parse_json(const char *path, char *content, SlConfig *config, FILE *errors) {
+  SlJsonParser parser = {content, content};
   const bool object = json_take(&parser, '{') && parse_json_members(&parser, config);
   json_skip_space(&parser);
   const bool complete = object && *parser.cursor == '\0';
@@ -732,37 +732,37 @@ static bool split_yaml(char *line, char **key, char **value) {
   return **key != '\0';
 }
 
-static bool parse_yaml_root(TlConfig *config, TlYamlState *state, char *key, char *value) {
+static bool parse_yaml_root(SlConfig *config, SlYamlState *state, char *key, char *value) {
   if (strcmp(key, "version") == 0) return set_version(config, value);
   if (strcmp(key, "strict") == 0) return set_strict(config, value);
   if (strcmp(key, "cache") == 0 && *value == '\0')
-    state->section = TL_YAML_CACHE;
+    state->section = SL_YAML_CACHE;
   else if (strcmp(key, "boundaries") == 0 && *value == '\0')
-    state->section = TL_YAML_BOUNDARIES;
+    state->section = SL_YAML_BOUNDARIES;
   else
     return false;
   return true;
 }
 
-static bool parse_yaml_boundary_name(TlConfig *config, TlYamlState *state, char *key, char *value) {
+static bool parse_yaml_boundary_name(SlConfig *config, SlYamlState *state, char *key, char *value) {
   if (*value != '\0') return false;
   state->boundary = get_boundary(config, key);
   if (!state->boundary) return false;
-  state->section = TL_YAML_BOUNDARY;
+  state->section = SL_YAML_BOUNDARY;
   state->patterns = NULL;
   return true;
 }
 
-static bool begin_yaml_patterns(TlYamlState *state, TlPatternList *patterns, char *value) {
+static bool begin_yaml_patterns(SlYamlState *state, SlPatternList *patterns, char *value) {
   if (*value != '\0') return parse_pattern_array(value, patterns);
   free_patterns(patterns);
   patterns->set = true;
-  state->section = TL_YAML_PATTERNS;
+  state->section = SL_YAML_PATTERNS;
   state->patterns = patterns;
   return true;
 }
 
-static bool parse_yaml_boundary_value(TlYamlState *state, char *key, char *value) {
+static bool parse_yaml_boundary_value(SlYamlState *state, char *key, char *value) {
   if (!state->boundary) return false;
   if (strcmp(key, "root") == 0) return replace_boundary_root(state->boundary, yaml_scalar(value));
   if (strcmp(key, "public") == 0)
@@ -771,26 +771,26 @@ static bool parse_yaml_boundary_value(TlYamlState *state, char *key, char *value
   return false;
 }
 
-static bool parse_yaml_pattern(TlYamlState *state, char *line) {
-  if (state->section != TL_YAML_PATTERNS || !state->patterns) return false;
+static bool parse_yaml_pattern(SlYamlState *state, char *line) {
+  if (state->section != SL_YAML_PATTERNS || !state->patterns) return false;
   line = trim(line);
   if (line[0] != '-' || (line[1] != ' ' && line[1] != '\t')) return false;
   char *pattern = yaml_scalar(line + 2);
   return pattern && add_pattern(state->patterns, pattern);
 }
 
-static bool parse_yaml_mapping(TlConfig *config, TlYamlState *state, size_t indent, char *line) {
+static bool parse_yaml_mapping(SlConfig *config, SlYamlState *state, size_t indent, char *line) {
   char *key;
   char *value;
   if (!split_yaml(line, &key, &value)) return false;
   if (indent == 0) return parse_yaml_root(config, state, key, value);
-  if (indent == 2 && state->section == TL_YAML_CACHE) return set_cache_value(config, key, value);
+  if (indent == 2 && state->section == SL_YAML_CACHE) return set_cache_value(config, key, value);
   if (indent == 2) return parse_yaml_boundary_name(config, state, key, value);
   if (indent == 4) return parse_yaml_boundary_value(state, key, value);
   return false;
 }
 
-static bool parse_yaml_line(TlConfig *config, TlYamlState *state, char *line) {
+static bool parse_yaml_line(SlConfig *config, SlYamlState *state, char *line) {
   strip_config_comment(line);
   trim_right(line);
   const size_t indent = yaml_indent(line);
@@ -799,8 +799,8 @@ static bool parse_yaml_line(TlConfig *config, TlYamlState *state, char *line) {
   return parse_yaml_mapping(config, state, indent, line + indent);
 }
 
-static bool parse_yaml(const char *path, char *content, TlConfig *config, FILE *errors) {
-  TlYamlState state = {TL_YAML_ROOT, NULL, NULL};
+static bool parse_yaml(const char *path, char *content, SlConfig *config, FILE *errors) {
+  SlYamlState state = {SL_YAML_ROOT, NULL, NULL};
   char *line = content;
   size_t line_number = 1;
   while (*line) {
@@ -818,7 +818,7 @@ static bool parse_yaml(const char *path, char *content, TlConfig *config, FILE *
   return true;
 }
 
-static bool grow_paths(TlPathList *paths) {
+static bool grow_paths(SlPathList *paths) {
   const size_t capacity = paths->capacity == 0 ? 4 : paths->capacity * 2;
   char **items = realloc(paths->items, capacity * sizeof(*items));
   if (!items) return false;
@@ -827,7 +827,7 @@ static bool grow_paths(TlPathList *paths) {
   return true;
 }
 
-static bool path_list_add(TlPathList *paths, const char *path) {
+static bool path_list_add(SlPathList *paths, const char *path) {
   if (paths->count == paths->capacity && !grow_paths(paths)) return false;
   paths->items[paths->count] = duplicate_string(path);
   if (!paths->items[paths->count]) return false;
@@ -835,10 +835,10 @@ static bool path_list_add(TlPathList *paths, const char *path) {
   return true;
 }
 
-static void path_list_free(TlPathList *paths) {
+static void path_list_free(SlPathList *paths) {
   for (size_t index = 0; index < paths->count; index += 1) free(paths->items[index]);
   free(paths->items);
-  *paths = (TlPathList){0};
+  *paths = (SlPathList){0};
 }
 
 static bool regular_file(const char *path) {
@@ -847,12 +847,12 @@ static bool regular_file(const char *path) {
 }
 
 static int config_in_directory(const char *directory, char *path) {
-  const char *names[] = {".tree-legibilityrc.toml", ".tree-legibilityrc.json",
-                         ".tree-legibilityrc.yaml", ".tree-legibilityrc.yml"};
+  const char *names[] = {".src-lintrc.toml", ".src-lintrc.json", ".src-lintrc.yaml",
+                         ".src-lintrc.yml"};
   int found = 0;
   path[0] = '\0';
   for (size_t index = 0; index < 4; index += 1) {
-    char candidate[TL_PATH_CAPACITY];
+    char candidate[SL_PATH_CAPACITY];
     const int written = snprintf(candidate, sizeof(candidate), "%s/%s", directory, names[index]);
     if (written < 0 || (size_t)written >= sizeof(candidate)) return -1;
     if (!regular_file(candidate)) continue;
@@ -874,7 +874,7 @@ static bool parent_directory(char *directory) {
 }
 
 static bool file_directory(const char *file_path, char *directory) {
-  if (strlen(file_path) >= TL_PATH_CAPACITY) return false;
+  if (strlen(file_path) >= SL_PATH_CAPACITY) return false;
   strcpy(directory, file_path);
   char *slash = strrchr(directory, '/');
   if (!slash) return false;
@@ -886,7 +886,7 @@ static bool file_directory(const char *file_path, char *directory) {
 }
 
 static bool git_marker(const char *directory) {
-  char path[TL_PATH_CAPACITY];
+  char path[SL_PATH_CAPACITY];
   const int written = snprintf(path, sizeof(path), "%s/.git", directory);
   if (written < 0 || (size_t)written >= sizeof(path)) return false;
   struct stat information;
@@ -894,7 +894,7 @@ static bool git_marker(const char *directory) {
 }
 
 static bool find_git_root(const char *directory, char *root) {
-  if (strlen(directory) >= TL_PATH_CAPACITY) return false;
+  if (strlen(directory) >= SL_PATH_CAPACITY) return false;
   strcpy(root, directory);
   do {
     if (git_marker(root)) return true;
@@ -902,21 +902,21 @@ static bool find_git_root(const char *directory, char *root) {
   return false;
 }
 
-static bool collect_directory_config(const char *directory, TlPathList *paths, FILE *errors) {
-  char config_path[TL_PATH_CAPACITY];
+static bool collect_directory_config(const char *directory, SlPathList *paths, FILE *errors) {
+  char config_path[SL_PATH_CAPACITY];
   const int count = config_in_directory(directory, config_path);
   if (count < 0) return false;
   if (count > 1) {
-    fprintf(errors, "tree-legibility: multiple rc files in %s\n", directory);
+    fprintf(errors, "src-lint: multiple rc files in %s\n", directory);
     return false;
   }
   return count == 0 || path_list_add(paths, config_path);
 }
 
-static bool collect_config_paths(const char *file_path, TlPathList *paths, FILE *errors) {
-  char directory[TL_PATH_CAPACITY];
+static bool collect_config_paths(const char *file_path, SlPathList *paths, FILE *errors) {
+  char directory[SL_PATH_CAPACITY];
   if (!file_directory(file_path, directory)) return false;
-  char git_root[TL_PATH_CAPACITY];
+  char git_root[SL_PATH_CAPACITY];
   const bool bounded = find_git_root(directory, git_root);
   do {
     if (!collect_directory_config(directory, paths, errors)) return false;
@@ -925,8 +925,8 @@ static bool collect_config_paths(const char *file_path, TlPathList *paths, FILE 
   return true;
 }
 
-static bool set_repository_root(TlConfig *config, const char *config_path) {
-  char directory[TL_PATH_CAPACITY];
+static bool set_repository_root(SlConfig *config, const char *config_path) {
+  char directory[SL_PATH_CAPACITY];
   if (!file_directory(config_path, directory)) return false;
   const char *policy_path = directory[0] == '/' ? directory + 1 : directory;
   if (strlen(policy_path) >= sizeof(config->repository_root)) return false;
@@ -941,10 +941,10 @@ static bool path_ends_with(const char *path, const char *suffix) {
   return strcmp(path + path_length - suffix_length, suffix) == 0;
 }
 
-static bool parse_config_file(const char *path, TlConfig *config, FILE *errors) {
+static bool parse_config_file(const char *path, SlConfig *config, FILE *errors) {
   char *content = read_file(path);
   if (!content) {
-    fprintf(errors, "tree-legibility: cannot read %s\n", path);
+    fprintf(errors, "src-lint: cannot read %s\n", path);
     return false;
   }
   const bool json = path_ends_with(path, ".json");
@@ -956,7 +956,7 @@ static bool parse_config_file(const char *path, TlConfig *config, FILE *errors) 
   return parsed;
 }
 
-static bool apply_config_paths(TlPathList *paths, TlConfig *config, FILE *errors) {
+static bool apply_config_paths(SlPathList *paths, SlConfig *config, FILE *errors) {
   for (size_t index = paths->count; index > 0; index -= 1) {
     if (!parse_config_file(paths->items[index - 1], config, errors)) return false;
   }
@@ -989,14 +989,14 @@ static bool valid_pattern(const char *pattern) {
   return has_prefix && strcmp(star, "**") == 0;
 }
 
-static bool valid_patterns(const TlPatternList *patterns) {
+static bool valid_patterns(const SlPatternList *patterns) {
   for (size_t index = 0; index < patterns->count; index += 1) {
     if (!valid_pattern(patterns->items[index])) return false;
   }
   return true;
 }
 
-static bool duplicate_boundary_root(const TlConfig *config, size_t index) {
+static bool duplicate_boundary_root(const SlConfig *config, size_t index) {
   const char *root = config->boundaries[index].root;
   for (size_t other = 0; other < index; other += 1) {
     if (strcmp(config->boundaries[other].root, root) == 0) return true;
@@ -1004,10 +1004,10 @@ static bool duplicate_boundary_root(const TlConfig *config, size_t index) {
   return false;
 }
 
-static bool valid_boundaries(const TlConfig *config) {
+static bool valid_boundaries(const SlConfig *config) {
   for (size_t index = 0; index < config->boundary_count; index += 1) {
-    const TlBoundaryConfig *boundary = &config->boundaries[index];
-    const bool valid_name = boundary->name[0] && strlen(boundary->name) < TL_OWNER_CAPACITY;
+    const SlBoundaryConfig *boundary = &config->boundaries[index];
+    const bool valid_name = boundary->name[0] && strlen(boundary->name) < SL_OWNER_CAPACITY;
     if (!valid_name || !boundary->root_set) return false;
     if (!valid_boundary_root(boundary->root) || duplicate_boundary_root(config, index))
       return false;
@@ -1018,15 +1018,15 @@ static bool valid_boundaries(const TlConfig *config) {
   return true;
 }
 
-static bool validate_config(const TlConfig *config, const char *file_path, FILE *errors) {
+static bool validate_config(const SlConfig *config, const char *file_path, FILE *errors) {
   if (valid_boundaries(config)) return true;
-  fprintf(errors, "tree-legibility: %s: invalid merged boundary configuration\n", file_path);
+  fprintf(errors, "src-lint: %s: invalid merged boundary configuration\n", file_path);
   return false;
 }
 
-bool tl_config_load_for_file(const char *file_path, TlConfig *config, FILE *errors) {
-  tl_config_init(config);
-  TlPathList paths = {0};
+bool sl_config_load_for_file(const char *file_path, SlConfig *config, FILE *errors) {
+  sl_config_init(config);
+  SlPathList paths = {0};
   const bool collected = collect_config_paths(file_path, &paths, errors);
   if (!collected) {
     path_list_free(&paths);
@@ -1038,7 +1038,7 @@ bool tl_config_load_for_file(const char *file_path, TlConfig *config, FILE *erro
   const bool valid = applied && validate_config(config, file_path, errors);
   config->present = has_config;
   path_list_free(&paths);
-  if (!valid) tl_config_free(config);
+  if (!valid) sl_config_free(config);
   return valid;
 }
 
@@ -1047,19 +1047,19 @@ static bool at_or_below(const char *path, const char *root) {
   return strcmp(path, root) == 0 || (strncmp(path, root, length) == 0 && path[length] == '/');
 }
 
-static bool boundary_root(const TlConfig *config, const TlBoundaryConfig *boundary, char *root) {
+static bool boundary_root(const SlConfig *config, const SlBoundaryConfig *boundary, char *root) {
   if (!boundary->root_set || !boundary->root) return false;
   const char *separator = config->repository_root[0] == '\0' ? "" : "/";
-  const int written = snprintf(root, TL_PATH_CAPACITY, "%s%s%s", config->repository_root, separator,
+  const int written = snprintf(root, SL_PATH_CAPACITY, "%s%s%s", config->repository_root, separator,
                                boundary->root);
-  return written >= 0 && written < TL_PATH_CAPACITY;
+  return written >= 0 && written < SL_PATH_CAPACITY;
 }
 
-bool tl_config_boundary_for_path(const TlConfig *config, const char *path,
-                                 const TlBoundaryConfig **boundary, const char **inside) {
+bool sl_config_boundary_for_path(const SlConfig *config, const char *path,
+                                 const SlBoundaryConfig **boundary, const char **inside) {
   size_t longest = 0;
   for (size_t index = 0; index < config->boundary_count; index += 1) {
-    char root[TL_PATH_CAPACITY];
+    char root[SL_PATH_CAPACITY];
     if (!boundary_root(config, &config->boundaries[index], root)) continue;
     const size_t length = strlen(root);
     if (length <= longest || !at_or_below(path, root)) continue;
@@ -1082,18 +1082,18 @@ static bool pattern_matches(const char *pattern, const char *value) {
   return strncmp(pattern, value, prefix_length) == 0 && (exact || descendant);
 }
 
-static bool pattern_list_matches(const TlPatternList *patterns, const char *value) {
+static bool pattern_list_matches(const SlPatternList *patterns, const char *value) {
   for (size_t index = 0; index < patterns->count; index += 1) {
     if (pattern_matches(patterns->items[index], value)) return true;
   }
   return false;
 }
 
-bool tl_config_public_entry(const TlBoundaryConfig *boundary, const char *inside) {
+bool sl_config_public_entry(const SlBoundaryConfig *boundary, const char *inside) {
   return pattern_list_matches(&boundary->public_entries, inside);
 }
 
-bool tl_config_allowed_target(const TlBoundaryConfig *boundary, const char *target) {
+bool sl_config_allowed_target(const SlBoundaryConfig *boundary, const char *target) {
   return pattern_list_matches(&boundary->allow, target);
 }
 
@@ -1111,14 +1111,14 @@ static void hash_string(uint64_t *hash, const char *value) {
   hash_bytes(hash, &separator, 1);
 }
 
-static void hash_patterns(uint64_t *hash, const TlPatternList *patterns) {
+static void hash_patterns(uint64_t *hash, const SlPatternList *patterns) {
   hash_bytes(hash, &patterns->set, sizeof(patterns->set));
   for (size_t index = 0; index < patterns->count; index += 1) {
     hash_string(hash, patterns->items[index]);
   }
 }
 
-static void hash_boundary(uint64_t *hash, const TlBoundaryConfig *boundary) {
+static void hash_boundary(uint64_t *hash, const SlBoundaryConfig *boundary) {
   hash_string(hash, boundary->name);
   hash_string(hash, boundary->root);
   hash_bytes(hash, &boundary->root_set, sizeof(boundary->root_set));
@@ -1126,7 +1126,7 @@ static void hash_boundary(uint64_t *hash, const TlBoundaryConfig *boundary) {
   hash_patterns(hash, &boundary->allow);
 }
 
-uint64_t tl_config_hash(const TlConfig *config) {
+uint64_t sl_config_hash(const SlConfig *config) {
   uint64_t hash = UINT64_C(1469598103934665603);
   hash_bytes(&hash, &config->version, sizeof(config->version));
   hash_bytes(&hash, &config->strict, sizeof(config->strict));

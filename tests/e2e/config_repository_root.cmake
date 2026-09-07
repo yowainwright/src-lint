@@ -1,6 +1,6 @@
 file(REMOVE_RECURSE "${WORK_ROOT}")
 file(MAKE_DIRECTORY "${WORK_ROOT}/repo/.git" "${WORK_ROOT}/repo/services/orders")
-file(WRITE "${WORK_ROOT}/.tree-legibilityrc.toml" "version = 1\nstrict = true\n")
+file(WRITE "${WORK_ROOT}/.src-lintrc.toml" "version = 1\nstrict = true\n")
 file(WRITE "${WORK_ROOT}/repo/services/orders/create.ts" "import \"./missing.ts\";\n")
 
 execute_process(

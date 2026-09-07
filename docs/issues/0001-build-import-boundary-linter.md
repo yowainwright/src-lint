@@ -23,17 +23,11 @@ Imports are the first enforcement seam. Call-chain analysis can build on the sam
 
 ```text
 services/orders/create.ts
-  -> ../billing/internal/ledger.ts  TL1001 boundary violation
+  -> ../billing/internal/ledger.ts  SL1001 boundary violation
   -> ../billing/api/index.ts        allowed public entry
 ```
 
 Zero-configuration analysis must fail on obvious sibling-service traversal. Discovery may suggest additional boundaries, but inference cannot weaken an explicit rule.
-
-Initial files:
-
-- `src/imports.c`
-- `src/boundaries.c`
-- `tests/imports_test.c`
 
 ## 2. Configuration and inheritance
 
@@ -52,20 +46,14 @@ public = ["api/**", "proto/**"]
 allow = ["shared/**"]
 ```
 
-The same model supports `.tree-legibilityrc.toml`, `.tree-legibilityrc.json`, and `.tree-legibilityrc.yaml`. Multiple rc files in one directory are an error.
+The same model supports `.src-lintrc.toml`, `.src-lintrc.json`, and `.src-lintrc.yaml`. Multiple rc files in one directory are an error.
 
 ```text
-repo/.tree-legibilityrc.toml
-  services/billing/.tree-legibilityrc.toml
+repo/.src-lintrc.toml
+  services/billing/.src-lintrc.toml
     root and allow are inherited
     public is replaced by the child value
 ```
-
-Initial files:
-
-- `src/config.c`
-- `include/tree_legibility/config.h`
-- `tests/config_test.c`
 
 ## 3. Analyzer and cache
 
@@ -83,7 +71,7 @@ flowchart LR
 
 Tree-sitter adapters are the target parser layer. The first vertical slice may use lexical adapters behind that interface so the graph and enforcement contracts can be tested before grammars are vendored.
 
-The disposable cache lives at `.tree-legibility/cache/` and defaults to an 8 MiB hard limit. A key covers tool version, parser version, effective configuration, path, and source content. Eviction is least-recently-used by stored bytes.
+The disposable cache lives at `.src-lint/cache/` and defaults to an 8 MiB hard limit. A key covers tool version, parser version, effective configuration, path, and source content. Eviction is least-recently-used by stored bytes.
 
 Performance budgets:
 
@@ -91,20 +79,14 @@ Performance budgets:
 - A warm one-file check takes at most 50 ms in the 10,000-file fixture.
 - The cache stays within its configured limit after every successful command.
 
-Initial files:
-
-- `src/scanner.c`
-- `src/graph.c`
-- `src/cache.c`
-
 ## 4. Commands and graph output
 
 The standalone CLI is the source of truth. ESLint, Ruff, golangci-lint, editors, and CI consume stable output instead of owning separate rule implementations.
 
 ```text
-tree-legibility check [path] [--strict] [--format text|json]
-tree-legibility discover [path] [--format text|json]
-tree-legibility graph [path] [--format json|html]
+src-lint check [path] [--strict] [--format text|json]
+src-lint discover [path] [--format text|json]
+src-lint graph [path] [--format json|html]
 ```
 
 JSON graph output uses a node and edge document suitable for JSONCrack-like rendering. A violation edge includes its rule, source location, owner, and suggested public entry.
@@ -150,11 +132,4 @@ The first vertical slice proves the core path before adding every parser and rc 
 | Policy | TOML, JSON, and YAML parity with parent-child merging |
 | Insight | Discovery, incremental cache, JSON graph, and interactive HTML |
 
-The import slice is complete when two sibling services produce one deterministic `TL1001` diagnostic, permit a public entry, emit equivalent JSON, and pass under AddressSanitizer.
-
-Initial files
-
-- `CMakeLists.txt`
-- `src/main.c`
-- `tests/fixtures/services/`
-- `.github/workflows/ci.yml`
+The import slice is complete when two sibling services produce one deterministic `SL1001` diagnostic, permit a public entry, emit equivalent JSON, and pass under AddressSanitizer.

@@ -4,7 +4,7 @@ static const char HTML_HEAD[] =
     "<!doctype html>\n"
     "<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-    "<title>tree-legibility dependency graph</title>\n<style>\n"
+    "<title>src-lint dependency graph</title>\n<style>\n"
     ":root{color-scheme:dark;font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;"
     "--bg:#0a0d12;--panel:#111722;--line:#384357;--text:#e7edf6;--muted:#8d9aae;"
     "--ok:#50c878;--bad:#ff667a;--warn:#f0ba55}\n"
@@ -31,7 +31,7 @@ static const char HTML_HEAD[] =
     "font:600 12px/1 sans-serif;margin-bottom:10px}.path{display:block;overflow-wrap:anywhere}"
     ".rule{display:block;color:var(--bad);font-size:12px;margin-top:8px}\n"
     "</style>\n</head>\n<body>\n"
-    "<header><h1>tree-legibility</h1><span class=\"stats\" id=\"stats\"></span>"
+    "<header><h1>src-lint</h1><span class=\"stats\" id=\"stats\"></span>"
     "<label>Boundary <select id=\"boundary-filter\"><option value=\"\">All</option>"
     "</select></label><button id=\"reset\" type=\"button\">Reset view</button></header>\n"
     "<main id=\"viewport\"><div id=\"graph-canvas\"><svg id=\"edges\"></svg>"
@@ -222,9 +222,9 @@ static const char BOOT_SCRIPT[] =
     "document.querySelector('#reset').addEventListener('click', reset);\n"
     "render();\n</script>\n</body>\n</html>\n";
 
-bool tl_graph_write_html(TlGraph *graph, FILE *output) {
+bool sl_graph_write_html(SlGraph *graph, FILE *output) {
   fputs(HTML_HEAD, output);
-  if (!tl_graph_write_json(graph, output)) return false;
+  if (!sl_graph_write_json(graph, output)) return false;
   fputs(SETUP_SCRIPT, output);
   fputs(STATUS_SCRIPT, output);
   fputs(FILTER_SCRIPT, output);

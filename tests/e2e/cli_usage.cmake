@@ -6,7 +6,7 @@ execute_process(
 
 set(commands "check" "discover" "graph")
 foreach(command IN LISTS commands)
-  string(FIND "${help_output}" "tree-legibility ${command}" position)
+  string(FIND "${help_output}" "src-lint ${command}" position)
   if(position EQUAL -1)
     message(FATAL_ERROR "Help is missing the ${command} command")
   endif()

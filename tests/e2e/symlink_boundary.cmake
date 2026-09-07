@@ -49,6 +49,6 @@ execute_process(
   ERROR_VARIABLE subtree_errors
 )
 
-if(NOT subtree_result EQUAL 1 OR NOT subtree_output MATCHES "TL1001")
+if(NOT subtree_result EQUAL 1 OR NOT subtree_output MATCHES "SL1001")
   message(FATAL_ERROR "Symlinked boundary subtree bypassed policy\n${subtree_output}\n${subtree_errors}")
 endif()

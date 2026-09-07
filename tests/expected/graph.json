@@ -21,7 +21,7 @@
       "column": 28,
       "language": "javascript",
       "status": "violation",
-      "rule": "TL1001",
+      "rule": "SL1001",
       "sourceBoundary": "orders",
       "targetBoundary": "billing",
       "owner": "billing",
