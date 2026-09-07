@@ -22,6 +22,7 @@ function(run_script script expected_exit)
   execute_process(
     COMMAND "${repo}/${script}"
     WORKING_DIRECTORY "${repo}"
+    INPUT_FILE "${WORK_ROOT}/stdin.txt"
     RESULT_VARIABLE result
     OUTPUT_VARIABLE output
     ERROR_VARIABLE errors
@@ -35,6 +36,7 @@ function(run_script script expected_exit)
 endfunction()
 
 file(REMOVE_RECURSE "${WORK_ROOT}")
+file(WRITE "${WORK_ROOT}/stdin.txt" "unexpected interactive input\n")
 foreach(mode legacy fresh protected custom separate global global_legacy inherited worktree command empty)
   set(ENV{GIT_CONFIG_GLOBAL} /dev/null)
   set(ENV{GIT_CONFIG_COUNT} 0)
@@ -175,12 +177,29 @@ execute_process(COMMAND /bin/test -x "${hooks_root}/pre-commit"
   COMMAND_ERROR_IS_FATAL ANY)
 
 set(mode pre-commit)
+file(WRITE "${repo}/noninteractive.sh" [=[
+#!/bin/sh
+set -eu
+if IFS= read -r input; then
+  printf 'pre-commit inherited stdin\n' >&2
+  exit 1
+fi
+test "$GIT_TERMINAL_PROMPT" = 0
+test "$GIT_PAGER" = cat
+test "$PAGER" = cat
+]=])
 file(WRITE "${repo}/CMakeLists.txt" [=[
 cmake_minimum_required(VERSION 3.20)
 project(HookFixture NONE)
+execute_process(
+  COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/noninteractive.sh"
+  COMMAND_ERROR_IS_FATAL ANY)
 enable_testing()
 add_test(NAME hook_smoke COMMAND "${CMAKE_COMMAND}" -E true)
 ]=])
+set(ENV{GIT_TERMINAL_PROMPT} 1)
+set(ENV{GIT_PAGER} false)
+set(ENV{PAGER} false)
 run_script(.git/hooks/pre-commit 0)
 
 # Exercise CMake's absolute build paths after a checkout is moved.

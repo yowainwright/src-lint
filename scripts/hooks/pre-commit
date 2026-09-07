@@ -3,6 +3,9 @@
 
 set -euo pipefail
 
+export GIT_PAGER=cat PAGER=cat GIT_TERMINAL_PROMPT=0
+exec </dev/null
+
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 readonly REPO_ROOT
 
