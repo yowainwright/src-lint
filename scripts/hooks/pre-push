@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# src-lint managed Git hook
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+readonly REPO_ROOT
+
+check_dependencies() {
+  command -v codependence >/dev/null || {
+    printf 'pre-push: run brew bundle to install codependence\n' >&2
+    return 1
+  }
+  codependence --noCache --format table
+}
+
+cd "$REPO_ROOT"
+check_dependencies
+cmake -DSUITE=release -P "$REPO_ROOT/scripts/run-tests.cmake"
+cmake -DSUITE=sanitizers -P "$REPO_ROOT/scripts/run-tests.cmake"

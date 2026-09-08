@@ -1,0 +1,8 @@
+version = 1
+
+[boundaries.orders]
+root = "domains/orders"
+allow = ["domains/billing/private/**"]
+
+[boundaries.billing]
+root = "domains/billing"

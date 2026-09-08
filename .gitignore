@@ -1,34 +1,42 @@
-# Prerequisites
 *.d
 
-# Object files
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+build.ninja
+cmake_install.cmake
+compile_commands.json
+install_manifest.txt
+.ninja_deps
+.ninja_log
+
 *.o
-*.ko
 *.obj
 *.elf
 
-# Linker output
 *.ilk
 *.map
 *.exp
 
-# Precompiled Headers
 *.gch
 *.pch
 
-# Libraries
 *.lib
 *.a
 *.la
 *.lo
 
-# Shared objects (inc. Windows DLLs)
 *.dll
 *.so
 *.so.*
 *.dylib
 
-# Executables
 *.exe
 *.out
 *.app
@@ -36,28 +44,25 @@
 *.x86_64
 *.hex
 
-# Debug files
 *.dSYM/
 *.su
 *.idb
 *.pdb
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
-
-# debug information files
 *.dwo
 
-# Beads / Dolt files (added by bd init)
+*.gcda
+*.gcno
+*.profdata
+*.profraw
+
+**/.src-lint/cache/
+
+/*.plist
+
+.DS_Store
+
 .dolt/
-*.db
-.beads-credential-key
-.claude/
-CLAUDE.md
-.beads/
+
+/.claude/settings.local.json
+/.claude/*.log

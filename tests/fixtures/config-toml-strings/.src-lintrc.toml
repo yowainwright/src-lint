@@ -1,0 +1,9 @@
+version = 1
+
+[boundaries.orders]
+root = "domains/orders"
+allow = ["unused,entry", "domains/billing/quote\"entry/**"]
+
+[boundaries.billing]
+root = "domains/billing"
+public = ["api/**"]

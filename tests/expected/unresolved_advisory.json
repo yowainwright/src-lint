@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "rule": "SL2001",
+      "source": "services/orders/create.ts",
+      "line": 1,
+      "column": 9,
+      "severity": "advisory",
+      "target": "services/orders/missing.ts"
+    }
+  ]
+}

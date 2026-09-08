@@ -1,0 +1,10 @@
+version = 1
+
+[cache]
+max_mib = 0
+
+[boundaries.orders]
+root = "domains/orders"
+
+[boundaries.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]
+root = "domains/billing"

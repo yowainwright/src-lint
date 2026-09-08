@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "rule": "SL1001",
+      "source": "services/orders/module.js",
+      "line": 1,
+      "column": 10,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/one.js"
+    },
+    {
+      "rule": "SL1001",
+      "source": "services/orders/module.js",
+      "line": 1,
+      "column": 48,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/two.js"
+    }
+  ]
+}

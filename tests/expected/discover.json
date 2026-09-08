@@ -1,0 +1,16 @@
+{
+  "boundaries": [
+    {
+      "name": "billing",
+      "root": "services/billing",
+      "source": "inferred",
+      "files": 2
+    },
+    {
+      "name": "orders",
+      "root": "services/orders",
+      "source": "inferred",
+      "files": 1
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# src-lint managed Git hook
+
+set -euo pipefail
+
+export GIT_PAGER=cat PAGER=cat GIT_TERMINAL_PROMPT=0
+exec </dev/null
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+readonly REPO_ROOT
+
+format_staged_sources() {
+  local -a staged_sources=()
+  local path
+  while IFS= read -r -d '' path; do
+    [[ ! -f "$path" ]] || staged_sources+=("$path")
+  done < <(git diff --cached --name-only --diff-filter=ACMR -z -- '*.c' '*.h')
+  ((${#staged_sources[@]} > 0)) || return 0
+  command -v clang-format >/dev/null || {
+    printf 'pre-commit: clang-format is required\n' >&2
+    return 1
+  }
+  clang-format --dry-run --Werror "${staged_sources[@]}"
+}
+
+cd "$REPO_ROOT"
+git diff --cached --check
+format_staged_sources
+cmake -DSUITE=debug -P "$REPO_ROOT/scripts/run-tests.cmake"

@@ -1,0 +1,9 @@
+version: 1
+strict: false
+boundaries:
+  orders:
+    root: 'domains/orders'
+  billing:
+    root: 'domains/billing#1'
+    public:
+      - 'api/**'

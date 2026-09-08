@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "rule": "SL1001",
+      "source": "services/orders/create.py",
+      "line": 1,
+      "column": 6,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal"
+    }
+  ]
+}

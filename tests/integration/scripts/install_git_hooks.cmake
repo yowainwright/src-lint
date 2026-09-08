@@ -1,0 +1,215 @@
+cmake_minimum_required(VERSION 3.20)
+
+find_program(GIT git REQUIRED)
+
+foreach(variable GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_CONFIG_PARAMETERS)
+  unset(ENV{${variable}})
+endforeach()
+set(ENV{GIT_CONFIG_NOSYSTEM} 1)
+set(ENV{GIT_CONFIG_GLOBAL} /dev/null)
+set(ENV{GIT_CONFIG_COUNT} 0)
+
+function(run_git)
+  execute_process(
+    COMMAND "${GIT}" -C "${repo}" ${ARGN}
+    RESULT_VARIABLE result
+    ERROR_VARIABLE errors
+  )
+  if(NOT result STREQUAL "0")
+    message(FATAL_ERROR "Git setup failed: ${ARGN}\n${errors}")
+  endif()
+endfunction()
+
+function(run_script script expected_exit)
+  execute_process(
+    COMMAND "${repo}/${script}"
+    WORKING_DIRECTORY "${repo}"
+    INPUT_FILE "${WORK_ROOT}/stdin.txt"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE output
+    ERROR_VARIABLE errors
+  )
+  if(NOT result STREQUAL "${expected_exit}")
+    message(FATAL_ERROR "${mode}: ${script} expected exit ${expected_exit}, got ${result}\n${output}\n${errors}")
+  endif()
+  if(ARGC GREATER 2 AND NOT errors MATCHES "${ARGV2}")
+    message(FATAL_ERROR "${mode}: ${script} did not report ${ARGV2}\n${errors}")
+  endif()
+endfunction()
+
+file(REMOVE_RECURSE "${WORK_ROOT}")
+file(WRITE "${WORK_ROOT}/stdin.txt" "unexpected interactive input\n")
+foreach(mode legacy fresh protected custom separate global global_legacy inherited worktree command empty)
+  set(ENV{GIT_CONFIG_GLOBAL} /dev/null)
+  set(ENV{GIT_CONFIG_COUNT} 0)
+  set(repo "${WORK_ROOT}/${mode}")
+  set(git_dir "${repo}/.git")
+  file(MAKE_DIRECTORY "${repo}")
+  file(COPY "${REPO_ROOT}/scripts" DESTINATION "${repo}")
+  if(mode STREQUAL "separate")
+    set(git_dir "${WORK_ROOT}/separate.git")
+    run_git(init --quiet --template= "--separate-git-dir=${git_dir}")
+  else()
+    run_git(init --quiet --template=)
+  endif()
+
+  if(mode STREQUAL "legacy" OR mode STREQUAL "protected" OR mode STREQUAL "inherited")
+    run_git(config --local core.hooksPath .githooks)
+  endif()
+  if(mode STREQUAL "custom")
+    run_git(config --local core.hooksPath custom-hooks)
+  endif()
+  if(mode STREQUAL "global" OR mode STREQUAL "global_legacy" OR mode STREQUAL "inherited")
+    set(ENV{GIT_CONFIG_GLOBAL} "${repo}/global.gitconfig")
+    set(global_path custom-hooks)
+    if(mode STREQUAL "global_legacy")
+      set(global_path .githooks)
+    endif()
+    file(WRITE "$ENV{GIT_CONFIG_GLOBAL}" "[core]\n\thooksPath = ${global_path}\n")
+  endif()
+  if(mode STREQUAL "worktree")
+    run_git(config extensions.worktreeConfig true)
+    run_git(config --worktree core.hooksPath custom-hooks)
+  endif()
+  if(mode STREQUAL "command")
+    set(ENV{GIT_CONFIG_COUNT} 1)
+    set(ENV{GIT_CONFIG_KEY_0} core.hooksPath)
+    set(ENV{GIT_CONFIG_VALUE_0} custom-hooks)
+  endif()
+  if(mode STREQUAL "empty")
+    file(APPEND "${git_dir}/config" "[core]\n\thooksPath =\n")
+  endif()
+  set(rejected_modes custom global global_legacy inherited worktree command empty)
+  if(mode IN_LIST rejected_modes)
+    set(configs "${git_dir}/config" "${git_dir}/config.worktree" "${repo}/global.gitconfig")
+    set(expected_configs)
+    foreach(path IN LISTS configs)
+      set(snapshot missing)
+      if(EXISTS "${path}")
+        file(SHA256 "${path}" snapshot)
+      endif()
+      list(APPEND expected_configs "${snapshot}")
+    endforeach()
+    run_script(scripts/setup.sh 1 "core.hooksPath")
+    foreach(path expected IN ZIP_LISTS configs expected_configs)
+      set(actual missing)
+      if(EXISTS "${path}")
+        file(SHA256 "${path}" actual)
+      endif()
+      if(NOT actual STREQUAL expected)
+        message(FATAL_ERROR "${mode}: setup changed ${path}")
+      endif()
+    endforeach()
+    if(EXISTS "${git_dir}/hooks")
+      message(FATAL_ERROR "${mode}: setup installed hooks despite conflicting configuration")
+    endif()
+    continue()
+  endif()
+  if(mode STREQUAL "protected")
+    file(WRITE "${git_dir}/hooks/pre-commit" "custom hook\n")
+    run_script(scripts/setup.sh 1)
+    file(READ "${git_dir}/hooks/pre-commit" preserved)
+    file(READ "${git_dir}/config" config)
+    if(NOT preserved STREQUAL "custom hook\n" OR NOT config MATCHES "hooksPath = .githooks")
+      message(FATAL_ERROR "Installer changed an unmanaged hook or configuration")
+    endif()
+    continue()
+  endif()
+
+  run_script(scripts/setup.sh 0)
+  foreach(hook pre-commit pre-push post-merge)
+    file(READ "${repo}/scripts/hooks/${hook}" expected)
+    if(NOT EXISTS "${git_dir}/hooks/${hook}")
+      message(FATAL_ERROR "${mode}: hook missing from default Git directory: ${hook}")
+    endif()
+    file(READ "${git_dir}/hooks/${hook}" installed)
+    execute_process(COMMAND /bin/test -x "${git_dir}/hooks/${hook}" RESULT_VARIABLE executable)
+    if(NOT installed STREQUAL expected OR NOT executable STREQUAL "0")
+      message(FATAL_ERROR "${mode}: installed hook differs or is not executable: ${hook}")
+    endif()
+  endforeach()
+  execute_process(
+    COMMAND "${GIT}" -C "${repo}" config --get core.hooksPath
+    RESULT_VARIABLE configured
+  )
+  if(NOT configured STREQUAL "1" OR EXISTS "${repo}/.githooks")
+    message(FATAL_ERROR "${mode}: installer retained the legacy hooks path")
+  endif()
+  run_script(scripts/setup.sh 0)
+endforeach()
+set(ENV{GIT_CONFIG_GLOBAL} /dev/null)
+set(ENV{GIT_CONFIG_COUNT} 0)
+
+set(mode setup_updates)
+set(repo "${WORK_ROOT}/fresh")
+set(hooks_root "${repo}/.git/hooks")
+set(installed_paths
+  "${hooks_root}/pre-commit" "${hooks_root}/pre-push"
+  "${hooks_root}/post-merge" "${repo}/.git/config")
+find_program(TOUCH touch REQUIRED)
+execute_process(COMMAND "${TOUCH}" -t 200001010000 ${installed_paths}
+  COMMAND_ERROR_IS_FATAL ANY)
+file(TIMESTAMP "${repo}/.git/config" original_timestamp)
+run_script(scripts/setup.sh 0)
+foreach(path IN LISTS installed_paths)
+  file(TIMESTAMP "${path}" timestamp)
+  if(NOT timestamp STREQUAL original_timestamp)
+    message(FATAL_ERROR "Setup rewrote an up-to-date file: ${path}")
+  endif()
+endforeach()
+
+file(APPEND "${repo}/scripts/hooks/pre-commit" "# refreshed source\n")
+run_script(scripts/setup.sh 0)
+file(READ "${repo}/scripts/hooks/pre-commit" expected)
+file(READ "${hooks_root}/pre-commit" installed)
+if(NOT installed STREQUAL expected)
+  message(FATAL_ERROR "Setup did not update the changed hook")
+endif()
+list(REMOVE_ITEM installed_paths "${hooks_root}/pre-commit")
+foreach(path IN LISTS installed_paths)
+  file(TIMESTAMP "${path}" timestamp)
+  if(NOT timestamp STREQUAL original_timestamp)
+    message(FATAL_ERROR "Setup rewrote an unchanged file: ${path}")
+  endif()
+endforeach()
+
+file(CHMOD "${hooks_root}/pre-commit" PERMISSIONS OWNER_READ OWNER_WRITE)
+run_script(scripts/setup.sh 0)
+execute_process(COMMAND /bin/test -x "${hooks_root}/pre-commit"
+  COMMAND_ERROR_IS_FATAL ANY)
+
+set(mode pre-commit)
+file(WRITE "${repo}/noninteractive.sh" [=[
+#!/bin/sh
+set -eu
+if IFS= read -r input; then
+  printf 'pre-commit inherited stdin\n' >&2
+  exit 1
+fi
+test "$GIT_TERMINAL_PROMPT" = 0
+test "$GIT_PAGER" = cat
+test "$PAGER" = cat
+]=])
+file(WRITE "${repo}/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.20)
+project(HookFixture NONE)
+execute_process(
+  COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/noninteractive.sh"
+  COMMAND_ERROR_IS_FATAL ANY)
+enable_testing()
+add_test(NAME hook_smoke COMMAND "${CMAKE_COMMAND}" -E true)
+]=])
+set(ENV{GIT_TERMINAL_PROMPT} 1)
+set(ENV{GIT_PAGER} false)
+set(ENV{PAGER} false)
+run_script(.git/hooks/pre-commit 0)
+
+# Exercise CMake's absolute build paths after a checkout is moved.
+file(RENAME "${repo}" "${WORK_ROOT}/moved repo")
+set(repo "${WORK_ROOT}/moved repo")
+run_script(.git/hooks/pre-commit 0)
+
+file(APPEND "${repo}/CMakeLists.txt" [=[
+add_test(NAME rejected COMMAND "${CMAKE_COMMAND}" -E false)
+]=])
+run_script(.git/hooks/pre-commit 1)

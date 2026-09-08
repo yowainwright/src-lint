@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "rule": "SL1001",
+      "source": "services/orders/module.mts",
+      "line": 1,
+      "column": 8,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/side-effect.ts"
+    },
+    {
+      "rule": "SL1001",
+      "source": "services/orders/module.mts",
+      "line": 2,
+      "column": 23,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/lazy.ts"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "findings": [
+    {
+      "rule": "SL1001",
+      "source": "services/orders/module.ts",
+      "line": 2,
+      "column": 4,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/lazy.ts"
+    },
+    {
+      "rule": "SL1001",
+      "source": "services/orders/module.ts",
+      "line": 5,
+      "column": 4,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/ledger.ts"
+    },
+    {
+      "rule": "SL1001",
+      "source": "services/orders/module.ts",
+      "line": 7,
+      "column": 37,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/other.ts"
+    },
+    {
+      "rule": "SL1001",
+      "source": "services/orders/module.ts",
+      "line": 8,
+      "column": 39,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/fourth.ts"
+    }
+  ]
+}

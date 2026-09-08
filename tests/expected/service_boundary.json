@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "rule": "SL1001",
+      "source": "services/orders/create.ts",
+      "line": 1,
+      "column": 28,
+      "sourceBoundary": "orders",
+      "targetBoundary": "billing",
+      "target": "services/billing/internal/ledger.ts"
+    }
+  ]
+}

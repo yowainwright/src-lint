@@ -1,0 +1,11 @@
+version = 1
+
+[cache]
+max_mib = 0
+
+[boundaries.orders]
+root = "domains/orders"
+
+[boundaries.billing]
+root = "domains/billing"
+public = ["api/**"]

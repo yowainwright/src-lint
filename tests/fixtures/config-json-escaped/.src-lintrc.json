@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "boundaries": {
+    "billing": {
+      "root": "services\/billing",
+      "public": ["api\/**"]
+    }
+  }
+}

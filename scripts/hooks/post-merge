@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# src-lint managed Git hook
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+readonly REPO_ROOT
+
+cd "$REPO_ROOT"
+
+if command -v brew >/dev/null && [[ -f Brewfile ]]; then
+  brew bundle check >/dev/null || {
+    printf 'post-merge: run brew bundle to install contributor tools\n' >&2
+  }
+fi
+
+./scripts/setup.sh >/dev/null

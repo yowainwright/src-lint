@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "strict": false,
+  "cache": {
+    "max_mib": 8
+  },
+  "boundaries": {
+    "orders": {
+      "root": "domains/orders"
+    },
+    "billing": {
+      "root": "domains/billing",
+      "public": ["api/**", "proto/**"]
+    }
+  }
+}
