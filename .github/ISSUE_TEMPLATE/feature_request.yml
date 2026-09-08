@@ -1,0 +1,17 @@
+name: Feature request
+description: Propose a boundary policy, language adapter, or CLI improvement.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Show a concrete case that src-lint does not handle today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Include example imports, configuration, or expected output.
+    validations:
+      required: true

@@ -127,10 +127,10 @@ Release tests generate a 10,000-file repository and enforce the 10 ms startup an
 
 ## Development
 
-Install contributor tools and the repository's versioned Git hooks:
+Install local tools and Git hooks:
 
 ```sh
-brew bundle
+brew bundle --file=scripts/Brewfile
 ./scripts/setup.sh
 ```
 
@@ -138,7 +138,9 @@ The test suite also requires Ruby for release automation checks. A CLI-only buil
 
 `scripts/setup.sh` generates `.git/hooks/` from the tracked sources in `scripts/hooks/`. It updates only changed hooks and exits without writing when they are current. It migrates the local `.githooks` setting but rejects other `core.hooksPath` settings without changing them.
 
-The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The post-merge hook refreshes installed hooks and warns when contributor tools are missing. The pre-push hook checks GitHub Actions dependency policy with Codependence, then runs the Release and sanitizer suites.
+The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The post-merge hook refreshes installed hooks and warns when local tools are missing. The pre-push hook checks GitHub Actions dependency policy with Codependence, then runs the Release and sanitizer suites.
+
+Formatting uses `clang-format --style=file:scripts/.clang-format`. Editor integrations must also use that explicit config path.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
