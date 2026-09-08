@@ -107,6 +107,13 @@ add_json_test(yaml_single_quoted_hash config-yaml-hash config_yaml_hash)
 add_json_test(configured_absolute_polyglot_imports config-absolute config_absolute)
 add_json_test(configured_target_precedes_inference config-target-only config_target_only)
 add_json_test(json_escaped_policy_values config-json-escaped service_boundary)
+foreach(format json yaml)
+  add_cli_test("${format}_config_escapes" config_escapes
+    "-DFORMAT=${format}"
+    "-DSOURCE_FIXTURE=${FIXTURE_ROOT}"
+    "-DEXPECTED_ROOT=${EXPECTED_ROOT}"
+    "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/${format}-escapes-work")
+endforeach()
 
 add_cli_test(multiple_config_files invalid_config
   "-DFIXTURE=${FIXTURES}/config-multiple")

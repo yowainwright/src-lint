@@ -423,9 +423,9 @@ static int hex_value(char character) {
   return -1;
 }
 
-static bool read_hex_quad(const char *input, uint32_t *value) {
+static bool read_hex_digits(const char *input, size_t count, uint32_t *value) {
   *value = 0;
-  for (size_t index = 0; index < 4; index += 1) {
+  for (size_t index = 0; index < count; index += 1) {
     const int digit = hex_value(input[index]);
     if (digit < 0) return false;
     *value = (*value << 4) | (uint32_t)digit;
@@ -435,7 +435,7 @@ static bool read_hex_quad(const char *input, uint32_t *value) {
 
 static bool read_unicode_escape(const char **cursor, uint32_t *codepoint) {
   uint32_t first;
-  if (!read_hex_quad(*cursor, &first)) return false;
+  if (!read_hex_digits(*cursor, 4, &first)) return false;
   *cursor += 4;
   if (first < 0xd800 || first > 0xdfff) {
     *codepoint = first;
@@ -443,7 +443,7 @@ static bool read_unicode_escape(const char **cursor, uint32_t *codepoint) {
   }
   if (first > 0xdbff || (*cursor)[0] != '\\' || (*cursor)[1] != 'u') return false;
   uint32_t second;
-  if (!read_hex_quad(*cursor + 2, &second) || second < 0xdc00 || second > 0xdfff) return false;
+  if (!read_hex_digits(*cursor + 2, 4, &second) || second < 0xdc00 || second > 0xdfff) return false;
   *cursor += 6;
   *codepoint = 0x10000 + ((first - 0xd800) << 10) + second - 0xdc00;
   return true;
@@ -713,14 +713,97 @@ static size_t yaml_indent(const char *line) {
   return indent;
 }
 
+static bool read_yaml_hex_escape(const char **cursor, char escape, uint32_t *codepoint) {
+  size_t count = 0;
+  if (escape == 'x') count = 2;
+  if (escape == 'u') count = 4;
+  if (escape == 'U') count = 8;
+  if (!count || !read_hex_digits(*cursor, count, codepoint)) return false;
+  *cursor += count;
+  const bool surrogate = *codepoint >= 0xd800 && *codepoint <= 0xdfff;
+  return *codepoint != 0 && *codepoint <= 0x10ffff && !surrogate;
+}
+
+static bool decode_yaml_escape(const char **cursor, char **output) {
+  if (**cursor == '\0') return false;
+  const char escape = *(*cursor)++;
+  const char *escapes = "abtnvfre \t\"/\\N_LP";
+  const uint32_t values[] = {'\a', '\b', '\t', '\n', '\v', '\f', '\r',   0x1b,  ' ',
+                             '\t', '"',  '/',  '\\', 0x85, 0xa0, 0x2028, 0x2029};
+  const char *match = strchr(escapes, escape);
+  uint32_t codepoint;
+  if (match) {
+    codepoint = values[match - escapes];
+  } else if (!read_yaml_hex_escape(cursor, escape, &codepoint)) {
+    return false;
+  }
+  write_utf8(output, codepoint);
+  return true;
+}
+
+static bool copy_yaml_quoted(const char **cursor, char quote, char *output) {
+  while (**cursor) {
+    const char character = *(*cursor)++;
+    const bool doubled_quote = quote == '\'' && character == quote && **cursor == quote;
+    if (character == quote && !doubled_quote) {
+      *output = '\0';
+      return true;
+    }
+    if (doubled_quote) *cursor += 1;
+    const bool escape = quote == '"' && character == '\\';
+    if (escape && !decode_yaml_escape(cursor, &output)) return false;
+    if (!escape) *output++ = character;
+  }
+  return false;
+}
+
+static char *yaml_quoted_scalar(char **cursor) {
+  const size_t length = strlen(*cursor);
+  if (length > (SIZE_MAX - 1) / 2) return NULL;
+  char *value = malloc(length * 2 + 1);
+  if (!value) return NULL;
+  const char *input = *cursor + 1;
+  if (!copy_yaml_quoted(&input, **cursor, value)) {
+    free(value);
+    return NULL;
+  }
+  *cursor = (char *)input;
+  return value;
+}
+
 static char *yaml_scalar(char *value) {
   value = trim(value);
-  const size_t length = strlen(value);
-  const bool double_quoted = length >= 2 && value[0] == '"' && value[length - 1] == '"';
-  const bool single_quoted = length >= 2 && value[0] == '\'' && value[length - 1] == '\'';
-  if (!double_quoted && !single_quoted) return duplicate_string(value);
-  value[length - 1] = '\0';
-  return duplicate_string(value + 1);
+  if (*value != '"' && *value != '\'') return duplicate_string(value);
+  char *decoded = yaml_quoted_scalar(&value);
+  if (*trim_left(value) == '\0') return decoded;
+  free(decoded);
+  return NULL;
+}
+
+static char *yaml_pattern_item(char **cursor) {
+  if (**cursor == '"' || **cursor == '\'') return yaml_quoted_scalar(cursor);
+  char *end = *cursor + strcspn(*cursor, ",]");
+  const char saved = *end;
+  *end = '\0';
+  char *pattern = yaml_scalar(*cursor);
+  *end = saved;
+  *cursor = end;
+  return pattern;
+}
+
+static bool yaml_pattern_array(char *value, SlPatternList *patterns) {
+  if (*value++ != '[') return false;
+  free_patterns(patterns);
+  patterns->set = true;
+  while (*(value = trim_left(value))) {
+    if (*value == ']') return *trim_left(value + 1) == '\0';
+    char *pattern = yaml_pattern_item(&value);
+    if (!pattern || !add_pattern(patterns, pattern)) return false;
+    value = trim_left(value);
+    if (*value == ']') return *trim_left(value + 1) == '\0';
+    if (*value++ != ',') return false;
+  }
+  return false;
 }
 
 static bool split_yaml(char *line, char **key, char **value) {
@@ -754,7 +837,7 @@ static bool parse_yaml_boundary_name(SlConfig *config, SlYamlState *state, char 
 }
 
 static bool begin_yaml_patterns(SlYamlState *state, SlPatternList *patterns, char *value) {
-  if (*value != '\0') return parse_pattern_array(value, patterns);
+  if (*value != '\0') return yaml_pattern_array(value, patterns);
   free_patterns(patterns);
   patterns->set = true;
   state->section = SL_YAML_PATTERNS;
