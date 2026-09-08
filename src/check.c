@@ -33,6 +33,7 @@ typedef struct {
 typedef struct {
   bool applied;
   bool violation;
+  SlConfig target_config;
   SlOwner source_owner;
   SlOwner target_owner;
   const SlBoundaryConfig *target_boundary;
@@ -307,8 +308,7 @@ static bool resolve_javascript_path(char *path, SlPathKind kind) {
   if (kind != SL_PATH_DIRECTORY) {
     return resolve_suffixes(path, extensions, sizeof(extensions) / sizeof(*extensions));
   }
-  (void)resolve_suffixes(path, indexes, sizeof(indexes) / sizeof(*indexes));
-  return true;
+  return resolve_suffixes(path, indexes, sizeof(indexes) / sizeof(*indexes));
 }
 
 static bool resolve_python_path(char *path, SlPathKind kind) {
@@ -569,7 +569,8 @@ static void add_graph_edge(SlContext *context, const SlConfig *config, const cha
                            const char *rule, const SlEdgePolicy *policy, const char *suggestion) {
   if (context->command != SL_COMMAND_GRAPH || context->graph_failed) return;
   add_graph_node(context, config, source);
-  add_graph_node(context, config, target);
+  const SlConfig *target_config = policy ? &policy->target_config : config;
+  add_graph_node(context, target_config, target);
   if (context->graph_failed) return;
   const SlGraphEdgeInput input =
       graph_edge_input(context, config, source, target, import, status, rule, policy, suggestion);
@@ -655,19 +656,16 @@ static bool read_source_owner(SlContext *context, const SlConfig *config, const 
 static bool classify_configured(SlContext *context, const SlConfig *config, const char *source,
                                 const char *target, SlEdgePolicy *policy) {
   const SlBoundaryConfig *source_boundary;
-  const bool has_target =
-      configured_owner(config, target, &policy->target_owner, &policy->target_boundary);
+  const bool has_target = configured_owner(&policy->target_config, target, &policy->target_owner,
+                                           &policy->target_boundary);
   if (!has_target) return false;
   const bool has_source = read_source_owner(context, config, source, policy, &source_boundary);
   const bool same_boundary =
       has_source && strcmp(policy->source_owner.name, policy->target_owner.name) == 0;
-  const char *relative_target = config_relative_path(config, target);
   const bool public_target =
       sl_config_public_entry(policy->target_boundary, policy->target_owner.inside);
-  const bool allowed_target =
-      has_source && sl_config_allowed_target(source_boundary, relative_target);
   policy->applied = true;
-  policy->violation = !same_boundary && !public_target && !allowed_target;
+  policy->violation = !same_boundary && !public_target;
   return true;
 }
 
@@ -678,11 +676,34 @@ static void classify_inferred(const char *source, const char *target, SlEdgePoli
   policy->violation = crosses && !public_entry(policy->target_owner.inside);
 }
 
-static void classify_policy(SlContext *context, const SlConfig *config, const char *source,
+static bool load_target_policy(SlContext *context, const SlConfig *config, const char *source,
+                               const char *target, SlConfig *target_config) {
+  sl_config_init(target_config);
+  if (!config->present) return true;
+  char source_path[SL_PATH_CAPACITY];
+  char target_path[SL_PATH_CAPACITY];
+  const int source_length = snprintf(source_path, sizeof(source_path), "/%s", source);
+  const int target_length = snprintf(target_path, sizeof(target_path), "/%s", target);
+  if (source_length < 0 || source_length >= SL_PATH_CAPACITY) return false;
+  if (target_length < 0 || target_length >= SL_PATH_CAPACITY) return false;
+  return sl_config_load_for_import(source_path, target_path, target_config, context->errors);
+}
+
+static bool allowed_by_source(const SlConfig *config, const char *source, const char *target) {
+  const SlBoundaryConfig *boundary;
+  const char *inside;
+  if (!sl_config_boundary_for_path(config, source, &boundary, &inside)) return false;
+  const char *relative_target = config_relative_path(config, target);
+  return sl_config_allowed_target(boundary, relative_target);
+}
+
+static bool classify_policy(SlContext *context, const SlConfig *config, const char *source,
                             const char *target, SlEdgePolicy *policy) {
-  *policy = (SlEdgePolicy){0};
-  if (classify_configured(context, config, source, target, policy)) return;
-  classify_inferred(source, target, policy);
+  if (!load_target_policy(context, config, source, target, &policy->target_config)) return false;
+  if (!classify_configured(context, config, source, target, policy))
+    classify_inferred(source, target, policy);
+  if (policy->violation && allowed_by_source(config, source, target)) policy->violation = false;
+  return true;
 }
 
 static size_t public_prefix_length(const char *pattern) {
@@ -729,13 +750,32 @@ static int emit_policy_violation(SlContext *context, const SlConfig *config, con
   return 1;
 }
 
-static bool classify_canonical_target(SlContext *context, const SlConfig *config,
-                                      const char *source, const char *target, bool found,
-                                      char *canonical, SlEdgePolicy *policy) {
+static int classify_canonical_target(SlContext *context, const SlConfig *config, const char *source,
+                                     const char *target, bool found, char *canonical,
+                                     SlEdgePolicy *policy) {
   strcpy(canonical, target);
-  if (!found || !canonicalize_repository_path(canonical)) return false;
-  classify_policy(context, config, source, canonical, policy);
-  return true;
+  if (!found || !canonicalize_repository_path(canonical)) return 0;
+  if (strcmp(target, canonical) == 0) return 1;
+  return classify_policy(context, config, source, canonical, policy) ? 1 : -1;
+}
+
+static int evaluate_canonical_import(SlContext *context, const SlConfig *config, const char *source,
+                                     const SlImport *import, const char *target, bool found,
+                                     const SlEdgePolicy *lexical_policy,
+                                     SlEdgePolicy *canonical_policy) {
+  char canonical[SL_PATH_CAPACITY];
+  const int resolved = classify_canonical_target(context, config, source, target, found, canonical,
+                                                 canonical_policy);
+  if (resolved < 0) return -1;
+  if (lexical_policy->violation)
+    return emit_policy_violation(context, config, source, target, import, lexical_policy);
+  if (canonical_policy->violation)
+    return emit_policy_violation(context, config, source, canonical, import, canonical_policy);
+  if (!resolved) return emit_unresolved(context, config, source, target, import);
+  const SlEdgePolicy *metadata = canonical_policy->applied ? canonical_policy : lexical_policy;
+  if (!metadata->applied) metadata = NULL;
+  add_graph_edge(context, config, source, canonical, import, SL_EDGE_ALLOWED, NULL, metadata, NULL);
+  return 0;
 }
 
 static int evaluate_import(SlContext *context, const SlConfig *config, const char *source,
@@ -743,28 +783,25 @@ static int evaluate_import(SlContext *context, const SlConfig *config, const cha
   char target[SL_PATH_CAPACITY];
   if (!resolve_import_target(context, config, source, import, target)) return 0;
   const bool found = resolve_repository_path(target, import->language);
-  SlEdgePolicy lexical_policy;
-  classify_policy(context, config, source, target, &lexical_policy);
-  char canonical[SL_PATH_CAPACITY];
-  SlEdgePolicy canonical_policy = {0};
-  const bool resolved = classify_canonical_target(context, config, source, target, found, canonical,
-                                                  &canonical_policy);
-  if (lexical_policy.violation)
-    return emit_policy_violation(context, config, source, target, import, &lexical_policy);
-  if (canonical_policy.violation)
-    return emit_policy_violation(context, config, source, canonical, import, &canonical_policy);
-  if (!resolved) return emit_unresolved(context, config, source, target, import);
-  const SlEdgePolicy *metadata = canonical_policy.applied ? &canonical_policy : &lexical_policy;
-  if (!metadata->applied) metadata = NULL;
-  add_graph_edge(context, config, source, canonical, import, SL_EDGE_ALLOWED, NULL, metadata, NULL);
-  return 0;
+  SlEdgePolicy lexical = {0};
+  SlEdgePolicy canonical = {0};
+  const bool classified = classify_policy(context, config, source, target, &lexical);
+  int findings = -1;
+  if (classified)
+    findings = evaluate_canonical_import(context, config, source, import, target, found, &lexical,
+                                         &canonical);
+  sl_config_free(&lexical.target_config);
+  sl_config_free(&canonical.target_config);
+  return findings;
 }
 
 static int evaluate_imports(SlContext *context, const SlConfig *config, const char *source,
                             const SlImportList *imports) {
   int findings = 0;
   for (size_t index = 0; index < imports->count; index += 1) {
-    findings += evaluate_import(context, config, source, &imports->items[index]);
+    const int result = evaluate_import(context, config, source, &imports->items[index]);
+    if (result < 0) return -1;
+    findings += result;
   }
   return findings;
 }

@@ -1,0 +1,64 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Uses homebrew-tap's inventory and the README section pattern from fs-lint.
+require "json"
+
+def package_metadata(path, version)
+  data = JSON.parse(File.read(path))
+  expected = { "name" => "src-lint", "command" => "src-lint", "class_name" => "SrcLint",
+               "repo" => "yowainwright/src-lint", "asset_prefix" => "src-lint" }
+  abort "unexpected src-lint tap inventory" unless expected.all? { |key, value| data[key] == value }
+
+  data.merge("version" => version, "managed" => true, "readme" => true)
+end
+
+def readme_section
+  <<~MARKDOWN
+    ### [src-lint](https://github.com/yowainwright/src-lint)
+
+    Enforce import boundaries across services and packages.
+
+    Install [src-lint](Formula/src-lint.rb) | `Formula/src-lint.rb`
+
+    ```bash
+    brew install yowainwright/tap/src-lint
+    ```
+
+    Usage
+
+    ```bash
+    src-lint check . --strict
+    ```
+
+    ---
+
+  MARKDOWN
+end
+
+def update_readme(readme)
+  start_marker = "<!-- formulas:start -->"
+  end_marker = "<!-- formulas:end -->"
+  valid_markers = [start_marker, end_marker].all? { |marker| readme.scan(marker).size == 1 }
+  abort "README.md must contain one formulas block" unless valid_markers
+
+  block_pattern = /#{Regexp.escape(start_marker)}.*?#{Regexp.escape(end_marker)}/m
+  block = readme.match(block_pattern)&.to_s
+  abort "README.md formulas markers are reversed" unless block
+
+  section_pattern = /^### (?:\[src-lint\]\([^)]+\)|src-lint)\n.*?(?=^### |#{Regexp.escape(end_marker)})/m
+  section = readme_section
+  updated = block.sub(end_marker, "\n#{section}#{end_marker}")
+  updated = block.sub(section_pattern, section) if block.match?(section_pattern)
+  readme.sub(block_pattern, updated)
+end
+
+tap, version = ARGV
+abort "usage: update-tap-package <tap-dir> <version>" unless ARGV.size == 2
+abort "invalid release version" unless version.match?(/\A(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\z/)
+path = File.join(tap, "brews", "src-lint.json")
+readme_path = File.join(tap, "README.md")
+data = package_metadata(path, version)
+readme = update_readme(File.read(readme_path))
+File.write(path, "#{JSON.pretty_generate(data)}\n")
+File.write(readme_path, readme)

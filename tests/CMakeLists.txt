@@ -3,6 +3,8 @@ set(EXPECTED_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/expected")
 set(FIXTURE_ROOT "${FIXTURES}/service-boundary")
 set(NESTED_ROOT "${FIXTURES}/path-with-services/services/repo")
 
+add_subdirectory(unit)
+
 function(add_cli_test name script)
   add_test(NAME "${name}" COMMAND "${CMAKE_COMMAND}"
     "-DCLI=$<TARGET_FILE:src-lint>"
@@ -51,6 +53,11 @@ add_cli_test(repository_path_containing_services service_boundary_violation
 add_cli_test(scoped_repository_path_containing_services service_boundary_violation
   "-DFIXTURE=${NESTED_ROOT}" "-DSCOPE=${NESTED_ROOT}/services/orders")
 add_json_test(service_boundary_json service-boundary service_boundary)
+
+foreach(case template_expression source_allow target_policy empty_directory)
+  add_cli_test("regression_${case}" release_regressions
+    "-DCASE=${case}" "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/regression-${case}")
+endforeach()
 
 add_cli_test(canonical_symlink_boundary symlink_boundary
   "-DSOURCE_FIXTURE=${FIXTURES}/symlink-boundary"
@@ -169,9 +176,17 @@ add_cli_test(graph_go graph_language "-DFIXTURE=${FIXTURES}/go-single" -DLANGUAG
 add_cli_test(graph_proto graph_language "-DFIXTURE=${FIXTURES}/proto-import" -DLANGUAGE=proto)
 
 add_cli_test(cli_usage cli_usage)
+add_cli_test(cli_version cli_version "-DVERSION=${PROJECT_VERSION}")
 add_cli_test(invalid_root invalid_root "-DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME git_hook_installation COMMAND "${CMAKE_COMMAND}"
   "-DREPO_ROOT=${PROJECT_SOURCE_DIR}"
   "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/hooks-work"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/scripts/install_git_hooks.cmake")
 set_tests_properties(git_hook_installation PROPERTIES LABELS "integration;scripts")
+
+find_program(RUBY_EXECUTABLE ruby REQUIRED)
+add_test(NAME release_automation COMMAND "${RUBY_EXECUTABLE}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/integration/scripts/release_test.rb"
+  "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/release-work"
+  "$<TARGET_FILE:src-lint>" "${PROJECT_VERSION}")
+set_tests_properties(release_automation PROPERTIES LABELS "integration;scripts")

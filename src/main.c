@@ -9,6 +9,7 @@ static void print_usage(FILE *stream) {
   fputs("  src-lint check [path] [--strict] [--format text|json]\n", stream);
   fputs("  src-lint discover [path] [--format text|json]\n", stream);
   fputs("  src-lint graph [path] [--format json|html]\n", stream);
+  fputs("  src-lint --version\n", stream);
 }
 
 static bool is_help(const char *value) {
@@ -72,6 +73,10 @@ static bool parse_arguments(int argc, char **argv, SlRunOptions *options) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+    puts("src-lint " SRC_LINT_VERSION);
+    return 0;
+  }
   if (argc == 2 && is_help(argv[1])) {
     print_usage(stdout);
     return 0;

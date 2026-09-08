@@ -15,6 +15,8 @@ With no rc file, the CLI treats sibling directories under `services/<name>` as b
 
 Explicit policy takes precedence over inference. Unresolved local imports are `SL2001` advisories by default and errors under `--strict`.
 
+JavaScript and TypeScript directory imports resolve through supported `index` files. An existing directory alone does not count as a resolved module.
+
 ## Examples
 
 Cross-boundary imports should use an entry exposed through `api/`, `public/`, or `proto/`. Direct imports from an owner's internal implementation produce `SL1001`.
@@ -65,6 +67,7 @@ ctest --test-dir build-asan --output-on-failure
 ## Usage
 
 ```text
+src-lint --version
 src-lint check [path] [--strict] [--format text|json]
 src-lint discover [path] [--format text|json]
 src-lint graph [path] [--format json|html]
@@ -112,6 +115,8 @@ A nested rc file inherits its ancestors within the repository. Boundary maps mer
 
 `allow` belongs to the importing boundary and matches repository-relative targets. `public` belongs to the imported boundary and matches paths inside it. Entries are exact paths or prefixes ending in `/**`; other wildcard forms are invalid.
 
+Public-entry policy also includes nested rc files along the imported path, applied after importer-side overrides. Shared ancestor files are applied once. The importing boundary's `allow` rules remain explicit exceptions; target-side rc files cannot grant those exceptions.
+
 ## Cache
 
 Parsed imports are cached per repository in `.src-lint/cache/`. The default hard limit is 8 MiB; `cache.max_mib = 0` disables it.
@@ -129,6 +134,8 @@ brew bundle
 ./scripts/setup.sh
 ```
 
+The test suite also requires Ruby for release automation checks. A CLI-only build can use `-DBUILD_TESTING=OFF`.
+
 `scripts/setup.sh` generates `.git/hooks/` from the tracked sources in `scripts/hooks/`. It updates only changed hooks and exits without writing when they are current. It migrates the local `.githooks` setting but rejects other `core.hooksPath` settings without changing them.
 
 The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The post-merge hook refreshes installed hooks and warns when contributor tools are missing. The pre-push hook checks GitHub Actions dependency policy with Codependence, then runs the Release and sanitizer suites.
@@ -141,9 +148,23 @@ ctest --test-dir build --output-on-failure
 
 CLI-level fixtures cover each adapter, zero-config and configured policy, rc parity and inheritance, strict advisories, cache reuse and limits, discovery, JSON, and HTML.
 
-Tests live in `tests/e2e/` and `tests/integration/`, which includes performance tests and `scripts/` for setup and hooks. Shared inputs and snapshots remain in `tests/fixtures/` and `tests/expected/`. Isolated unit tests belong in `tests/unit/` when added.
+Isolated tests in `tests/unit/` call the import parsers, configuration parser, boundary matchers, and graph functions with in-memory inputs. They cover source coordinates, ignored syntax, rc format parity and inheritance, policy hashes, path segments, and graph ownership and serialization. Assertions run in Release builds and the test code is instrumented in sanitizer builds.
 
-CTest labels select a group, for example `ctest --test-dir build -L integration --output-on-failure`. Other labels are `e2e`, `scripts`, and `performance`; performance tests require a Release build.
+CLI tests live in `tests/e2e/`. API, performance, and hook tests live in `tests/integration/`. Shared inputs and snapshots remain in `tests/fixtures/` and `tests/expected/`.
+
+CTest labels select a group, for example `ctest --test-dir build -L unit --output-on-failure`. Other labels are `e2e`, `integration`, `scripts`, and `performance`; performance tests require a Release build.
+
+## Releases
+
+[`release.yml`](.github/workflows/release.yml) follows the [fs-lint release workflow](https://github.com/yowainwright/fs-lint/blob/main/.github/workflows/release.yml). A pushed `vMAJOR.MINOR.PATCH` tag must point to a commit on `main` and match `project(src_lint VERSION ...)` in `CMakeLists.txt`. That version also supplies `src-lint --version` and the parser cache's tool version.
+
+The workflow tests native macOS and Linux builds for ARM64 and AMD64, runs the sanitizer suite, then publishes the source archive, four binaries named `src-lint-{darwin,linux}-{arm64,amd64}`, SHA256 files, and binary provenance attestations.
+
+Homebrew automation uses `yowainwright/homebrew-tap`'s `brews/src-lint.json`, `scripts/new-formula`, and `scripts/update-formula`. It verifies every binary's checksum and [attestation](https://cli.github.com/manual/gh_attestation_verify), checks the host binary's version, generates the formula, runs Homebrew audit/install/test, and opens a tap PR. The inactive inventory becomes managed only after release verification; the formula's downloaded checksums must still match the verified binaries.
+
+Before the first Homebrew update, the tap's inventory and CI changes must be merged. Configure the src-lint repository secret `HOMEBREW_TAP_TOKEN` with a fine-grained token restricted to `yowainwright/homebrew-tap`, granting Contents and Pull requests write access. Protect `main` and release tags, and require tap CI before merging formula PRs.
+
+If GitHub publication succeeds but Homebrew fails, run the Release workflow manually from `main` with the existing tag. This retries Homebrew using the release scripts on `main`; it does not rebuild or replace published assets. The retry reuses an existing tap branch and open PR.
 
 ## Competitive landscape
 
