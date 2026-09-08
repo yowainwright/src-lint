@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+
 find_program(GIT git REQUIRED)
 
 foreach(variable GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_CONFIG_PARAMETERS)
