@@ -20,7 +20,7 @@ format_staged_sources() {
     printf 'pre-commit: clang-format is required\n' >&2
     return 1
   }
-  clang-format --dry-run --Werror "${staged_sources[@]}"
+  clang-format "--style=file:$REPO_ROOT/scripts/.clang-format" --dry-run --Werror "${staged_sources[@]}"
 }
 
 cd "$REPO_ROOT"

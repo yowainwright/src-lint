@@ -1,0 +1,13 @@
+{
+  "name": "src-lint",
+  "class_name": "SrcLint",
+  "command": "src-lint",
+  "repo": "yowainwright/src-lint",
+  "desc": "Enforce import boundaries across services and packages",
+  "homepage": "https://github.com/yowainwright/src-lint",
+  "license": "MIT",
+  "version": "0.1.0",
+  "asset_prefix": "src-lint",
+  "managed": false,
+  "readme": false
+}

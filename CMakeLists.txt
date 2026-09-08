@@ -21,13 +21,15 @@ add_library(src_lint_core
   src/imports.c
 )
 target_include_directories(src_lint_core PUBLIC include)
-target_compile_definitions(src_lint_core PRIVATE _DEFAULT_SOURCE _XOPEN_SOURCE=700)
+target_compile_definitions(src_lint_core PRIVATE
+  _DEFAULT_SOURCE _XOPEN_SOURCE=700 SRC_LINT_VERSION="${PROJECT_VERSION}")
 if(APPLE)
   target_compile_definitions(src_lint_core PRIVATE _DARWIN_C_SOURCE)
 endif()
 
 add_executable(src-lint src/main.c)
 target_link_libraries(src-lint PRIVATE src_lint_core)
+target_compile_definitions(src-lint PRIVATE SRC_LINT_VERSION="${PROJECT_VERSION}")
 
 target_compile_options(src_lint_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_compile_options(src-lint PRIVATE -Wall -Wextra -Wpedantic -Werror)

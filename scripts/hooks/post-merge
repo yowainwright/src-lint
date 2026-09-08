@@ -8,9 +8,9 @@ readonly REPO_ROOT
 
 cd "$REPO_ROOT"
 
-if command -v brew >/dev/null && [[ -f Brewfile ]]; then
-  brew bundle check >/dev/null || {
-    printf 'post-merge: run brew bundle to install contributor tools\n' >&2
+if command -v brew >/dev/null && [[ -f scripts/Brewfile ]]; then
+  brew bundle check --file=scripts/Brewfile >/dev/null || {
+    printf 'post-merge: run brew bundle --file=scripts/Brewfile to install local tools\n' >&2
   }
 fi
 

@@ -1024,17 +1024,20 @@ static bool path_ends_with(const char *path, const char *suffix) {
   return strcmp(path + path_length - suffix_length, suffix) == 0;
 }
 
+bool sl_config_parse(const char *path, char *content, SlConfig *config, FILE *errors) {
+  if (path_ends_with(path, ".json")) return parse_json(path, content, config, errors);
+  const bool yaml = path_ends_with(path, ".yaml") || path_ends_with(path, ".yml");
+  if (yaml) return parse_yaml(path, content, config, errors);
+  return parse_toml(path, content, config, errors);
+}
+
 static bool parse_config_file(const char *path, SlConfig *config, FILE *errors) {
   char *content = read_file(path);
   if (!content) {
     fprintf(errors, "src-lint: cannot read %s\n", path);
     return false;
   }
-  const bool json = path_ends_with(path, ".json");
-  const bool yaml = path_ends_with(path, ".yaml") || path_ends_with(path, ".yml");
-  bool parsed = json ? parse_json(path, content, config, errors) : false;
-  if (yaml) parsed = parse_yaml(path, content, config, errors);
-  if (!json && !yaml) parsed = parse_toml(path, content, config, errors);
+  const bool parsed = sl_config_parse(path, content, config, errors);
   free(content);
   return parsed;
 }
@@ -1128,6 +1131,42 @@ bool sl_config_load_for_file(const char *file_path, SlConfig *config, FILE *erro
 static bool at_or_below(const char *path, const char *root) {
   const size_t length = strlen(root);
   return strcmp(path, root) == 0 || (strncmp(path, root, length) == 0 && path[length] == '/');
+}
+
+static bool collect_target_configs(const char *target, SlPathList *paths, FILE *errors) {
+  struct stat information;
+  const bool directory = stat(target, &information) == 0 && S_ISDIR(information.st_mode);
+  if (!directory) return collect_config_paths(target, paths, errors);
+  char file_path[SL_PATH_CAPACITY];
+  const int written = snprintf(file_path, sizeof(file_path), "%s/.", target);
+  if (written < 0 || (size_t)written >= sizeof(file_path)) return false;
+  return collect_config_paths(file_path, paths, errors);
+}
+
+static bool apply_target_configs(const SlPathList *paths, const char *source, SlConfig *config,
+                                 FILE *errors) {
+  for (size_t index = paths->count; index > 0; index -= 1) {
+    const char *path = paths->items[index - 1];
+    if (!at_or_below(path + 1, config->repository_root)) continue;
+    char directory[SL_PATH_CAPACITY];
+    if (!file_directory(path, directory)) return false;
+    if (at_or_below(source, directory)) continue;
+    if (!parse_config_file(path, config, errors)) return false;
+  }
+  return true;
+}
+
+bool sl_config_load_for_import(const char *source, const char *target, SlConfig *config,
+                               FILE *errors) {
+  if (!sl_config_load_for_file(source, config, errors)) return false;
+  if (!config->present || !at_or_below(target + 1, config->repository_root)) return true;
+  SlPathList paths = {0};
+  const bool collected = collect_target_configs(target, &paths, errors);
+  const bool applied = collected && apply_target_configs(&paths, source, config, errors);
+  const bool valid = applied && validate_config(config, target, errors);
+  path_list_free(&paths);
+  if (!valid) sl_config_free(config);
+  return valid;
 }
 
 static bool boundary_root(const SlConfig *config, const SlBoundaryConfig *boundary, char *root) {

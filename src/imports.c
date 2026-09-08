@@ -19,6 +19,11 @@ typedef struct {
   char *cursor;
   bool expect_from;
   bool regex_allowed;
+  size_t *template_braces;
+  size_t template_count;
+  size_t template_capacity;
+  bool template_text;
+  bool failed;
 } SlJsScanner;
 
 static char *duplicate_string(const char *value) {
@@ -161,7 +166,58 @@ static bool skip_js_regex(SlJsScanner *scanner) {
   return true;
 }
 
+static bool grow_js_templates(SlJsScanner *scanner) {
+  const size_t capacity = scanner->template_capacity == 0 ? 8 : scanner->template_capacity * 2;
+  size_t *braces = realloc(scanner->template_braces, capacity * sizeof(*braces));
+  if (!braces) return false;
+  scanner->template_braces = braces;
+  scanner->template_capacity = capacity;
+  return true;
+}
+
+static bool begin_js_template(SlJsScanner *scanner) {
+  const bool full = scanner->template_count == scanner->template_capacity;
+  if (full && !grow_js_templates(scanner)) {
+    scanner->failed = true;
+    return false;
+  }
+  scanner->template_braces[scanner->template_count++] = 0;
+  scanner->template_text = true;
+  scanner->cursor += 1;
+  return true;
+}
+
+static bool template_delimiter(SlJsScanner *scanner) {
+  if (*scanner->cursor == '`') {
+    scanner->template_count -= 1;
+    scanner->template_text = false;
+    scanner->regex_allowed = false;
+    scanner->cursor += 1;
+    return true;
+  }
+  if (scanner->cursor[0] != '$' || scanner->cursor[1] != '{') return false;
+  scanner->template_braces[scanner->template_count - 1] = 1;
+  scanner->template_text = false;
+  scanner->expect_from = false;
+  scanner->regex_allowed = true;
+  scanner->cursor += 2;
+  return true;
+}
+
+static bool skip_template_text(SlJsScanner *scanner) {
+  while (*scanner->cursor) {
+    if (*scanner->cursor == '\\' && scanner->cursor[1]) {
+      scanner->cursor += 2;
+      continue;
+    }
+    if (template_delimiter(scanner)) return true;
+    scanner->cursor += 1;
+  }
+  return true;
+}
+
 static bool skip_js_ignored(SlJsScanner *scanner) {
+  if (scanner->template_text) return skip_template_text(scanner);
   if (line_comment_start(scanner->cursor)) {
     scanner->cursor = skip_line_comment(scanner->cursor);
     return true;
@@ -171,6 +227,7 @@ static bool skip_js_ignored(SlJsScanner *scanner) {
     return true;
   }
   if (skip_js_regex(scanner)) return true;
+  if (*scanner->cursor == '`') return begin_js_template(scanner);
   if (!quote_character(*scanner->cursor)) return false;
   scanner->cursor = skip_quoted(scanner->cursor);
   scanner->regex_allowed = false;
@@ -199,7 +256,21 @@ static bool closing_js_token(char character) {
   return character == ')' || character == ']' || character == '}' || character == '.';
 }
 
+static bool close_template_expression(SlJsScanner *scanner) {
+  if (scanner->template_count == 0) return false;
+  size_t *braces = &scanner->template_braces[scanner->template_count - 1];
+  if (*scanner->cursor == '{') *braces += 1;
+  if (*scanner->cursor != '}') return false;
+  *braces -= 1;
+  if (*braces != 0) return false;
+  scanner->template_text = true;
+  scanner->expect_from = false;
+  scanner->cursor += 1;
+  return true;
+}
+
 static void advance_js_character(SlJsScanner *scanner) {
+  if (close_template_expression(scanner)) return;
   const char character = *scanner->cursor;
   if (js_whitespace(character)) {
     scanner->cursor += 1;
@@ -216,7 +287,7 @@ static void advance_js_character(SlJsScanner *scanner) {
 }
 
 static bool next_js_token(SlJsScanner *scanner, SlToken *token) {
-  while (*scanner->cursor) {
+  while (*scanner->cursor && !scanner->failed) {
     if (skip_js_ignored(scanner)) continue;
     if (read_js_token(scanner, token)) return true;
     advance_js_character(scanner);
@@ -455,16 +526,19 @@ static bool add_js_import(SlImportList *list, SlImportEdge *edge, size_t line, s
 }
 
 static bool parse_javascript(char *content, SlImportList *list) {
-  SlJsScanner scanner = {content, content, false, true};
+  SlJsScanner scanner = {.source_start = content, .cursor = content, .regex_allowed = true};
   char *position = content;
   size_t line = 1;
   size_t column = 1;
   SlImportEdge edge;
+  bool parsed = true;
   while (next_js_import(&scanner, &edge)) {
     advance_position(&position, edge.specifier, &line, &column);
-    if (!add_js_import(list, &edge, line, column)) return false;
+    parsed = add_js_import(list, &edge, line, column);
+    if (!parsed) break;
   }
-  return true;
+  free(scanner.template_braces);
+  return parsed && !scanner.failed;
 }
 
 static char *skip_horizontal_space(char *cursor) {

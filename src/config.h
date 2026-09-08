@@ -38,7 +38,14 @@ typedef struct {
 
 void sl_config_init(SlConfig *config);
 void sl_config_free(SlConfig *config);
+/* Apply one rc layer to an initialized config, modifying content in place.
+ * This does not validate the merged policy; free the config after a parse failure. */
+bool sl_config_parse(const char *path, char *content, SlConfig *config, FILE *errors);
 bool sl_config_load_for_file(const char *file_path, SlConfig *config, FILE *errors);
+/* Absolute paths: preserve source overrides, then apply target-only rc layers in the policy root.
+ */
+bool sl_config_load_for_import(const char *source, const char *target, SlConfig *config,
+                               FILE *errors);
 bool sl_config_boundary_for_path(const SlConfig *config, const char *path,
                                  const SlBoundaryConfig **boundary, const char **inside);
 bool sl_config_public_entry(const SlBoundaryConfig *boundary, const char *inside);

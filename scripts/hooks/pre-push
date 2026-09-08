@@ -8,7 +8,7 @@ readonly REPO_ROOT
 
 check_dependencies() {
   command -v codependence >/dev/null || {
-    printf 'pre-push: run brew bundle to install codependence\n' >&2
+    printf 'pre-push: run brew bundle --file=scripts/Brewfile to install codependence\n' >&2
     return 1
   }
   codependence --noCache --format table
