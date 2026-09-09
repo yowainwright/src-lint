@@ -11,10 +11,14 @@ check_dependencies() {
     printf 'pre-push: run brew bundle --file=scripts/Brewfile to install codependence\n' >&2
     return 1
   }
-  codependence --noCache --format table
+  local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  local api_url="${GITHUB_API_URL:-https://api.github.com}"
+  if [[ -z "$token" && "$api_url" == https://api.github.com ]] &&
+    command -v gh >/dev/null 2>&1; then
+    token="$(gh auth token --hostname github.com 2>/dev/null)" || token=""
+  fi
+  GH_TOKEN="$token" codependence --noCache --format table
 }
 
 cd "$REPO_ROOT"
 check_dependencies
-cmake -DSUITE=release -P "$REPO_ROOT/scripts/run-tests.cmake"
-cmake -DSUITE=sanitizers -P "$REPO_ROOT/scripts/run-tests.cmake"

@@ -40,7 +40,7 @@ jobs:
           - target: linux-arm64
             runner: ubuntu-24.04-arm
           - target: linux-amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,8 +55,11 @@ jobs:
           cmake --build build --parallel
       - name: Verify tag version
         run: bash scripts/release.sh verify-version ./build/src-lint "$GITHUB_REF_NAME"
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
+      - name: Test functionality
+        run: ctest --test-dir build --parallel 4 --label-exclude '^performance$' --no-tests=error --output-on-failure
+      - name: Check performance budgets (Ubuntu 24.04 x64)
+        if: matrix.target == 'linux-amd64'
+        run: ctest --test-dir build --label-regex '^performance$' --no-tests=error --verbose
       - name: Package binary
         env:
           TARGET: ${{ matrix.target }}
@@ -92,7 +95,7 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DSRC_LINT_SANITIZERS=ON
           cmake --build build --parallel
-          ctest --test-dir build --output-on-failure
+          ctest --test-dir build --parallel 4 --output-on-failure
 
   publish:
     needs: [build, sanitizers]

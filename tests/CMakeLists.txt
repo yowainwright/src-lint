@@ -36,7 +36,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
   target_compile_options(performance_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME performance_budgets COMMAND performance_test
     $<TARGET_FILE:src-lint> "${CMAKE_CURRENT_BINARY_DIR}/performance-work")
-  set_tests_properties(performance_budgets PROPERTIES LABELS "integration;performance")
+  set_tests_properties(performance_budgets PROPERTIES LABELS "integration;performance" RUN_SERIAL TRUE)
 endif()
 
 add_cli_test(service_boundary_violation service_boundary_violation
@@ -183,10 +183,36 @@ add_test(NAME git_hook_installation COMMAND "${CMAKE_COMMAND}"
   "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/hooks-work"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/scripts/install_git_hooks.cmake")
 set_tests_properties(git_hook_installation PROPERTIES LABELS "integration;scripts")
+add_test(NAME pre_push_hook COMMAND "${CMAKE_COMMAND}"
+  "-DREPO_ROOT=${PROJECT_SOURCE_DIR}"
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/pre-push-work"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/scripts/pre_push_hook.cmake")
+set_tests_properties(pre_push_hook PROPERTIES LABELS "integration;scripts")
 
 find_program(RUBY_EXECUTABLE ruby REQUIRED)
-add_test(NAME release_automation COMMAND "${RUBY_EXECUTABLE}"
-  "${CMAKE_CURRENT_SOURCE_DIR}/integration/scripts/release_test.rb"
-  "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/release-work"
-  "$<TARGET_FILE:src-lint>" "${PROJECT_VERSION}")
-set_tests_properties(release_automation PROPERTIES LABELS "integration;scripts")
+function(add_release_test name)
+  add_test(NAME "release_automation_${name}" COMMAND "${RUBY_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/integration/scripts/release_test.rb"
+    "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/release-work/${name}"
+    "$<TARGET_FILE:src-lint>" "${PROJECT_VERSION}" ${ARGN})
+  set_tests_properties("release_automation_${name}" PROPERTIES LABELS "integration;scripts;release")
+endfunction()
+
+foreach(scenario initial retry bad_checksum missing_attestation missing_readme wrong_repository versions)
+  add_release_test("${scenario}" "${scenario}")
+endforeach()
+foreach(command "gh release" "gh attestation" "new-formula src-lint"
+    "brew audit" "brew install" "brew test" "git status" "git commit" "git push")
+  string(MAKE_C_IDENTIFIER "${command}" name)
+  add_release_test("failure_${name}" command_failure "${command}")
+endforeach()
+foreach(condition missing_token dirty_tap diff_error draft prerelease wrong_version)
+  add_release_test("failure_${condition}" precondition_failure "${condition}")
+endforeach()
+foreach(target darwin-arm64 darwin-amd64 linux-arm64 linux-amd64)
+  add_release_test("missing_${target}" missing_asset "${target}")
+endforeach()
+foreach(tag 0.1.0 v01.1.0 v1.2 v1.2.3-rc1 v1.2.3/branch)
+  string(MAKE_C_IDENTIFIER "${tag}" name)
+  add_release_test("invalid_tag_${name}" invalid_tag "${tag}")
+endforeach()

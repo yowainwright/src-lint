@@ -123,29 +123,34 @@ Parsed imports are cached per repository in `.src-lint/cache/`. The default hard
 
 Keys include tool, parser, and cache versions, effective configuration, file path, and source content. Least-recently-used records are trimmed by stored bytes. The cache is safe to delete and ignored by the supplied [`.gitignore`](.gitignore).
 
-Release tests generate a 10,000-file repository and enforce the 10 ms startup and 50 ms warm one-file budgets.
+Release tests generate a 10,000-file repository and enforce the 10 ms startup and 50 ms warm one-file budgets using the median of 31 process runs after three warmups. The benchmark uses `posix_spawn`, reports the timing range, and runs separately from other CTest tests to reduce measurement noise.
+
+CI and release workflows run functional tests on all four platforms and enforce timing budgets separately on the Ubuntu 24.04 x64 reference runner. They use [CTest label filters](https://cmake.org/cmake/help/latest/manual/ctest.1.html#label-matching) to select the existing `performance` tests. Local Release test runs include both groups.
 
 ## Development
 
-Install local tools and Git hooks:
+Install local tools:
 
 ```sh
 brew bundle --file=scripts/Brewfile
-./scripts/setup.sh
 ```
 
 The test suite also requires Ruby for release automation checks. A CLI-only build can use `-DBUILD_TESTING=OFF`.
 
-`scripts/setup.sh` generates `.git/hooks/` from the tracked sources in `scripts/hooks/`. It updates only changed hooks and exits without writing when they are current. It migrates the local `.githooks` setting but rejects other `core.hooksPath` settings without changing them.
+CMake installs Git hooks automatically when configuring a local checkout. It uses `scripts/setup.sh`, which updates changed hooks and leaves current hooks untouched. CI, source archives, and subproject builds skip installation. Set `-DSRC_LINT_INSTALL_GIT_HOOKS=OFF` to keep another hook setup.
 
-The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The post-merge hook refreshes installed hooks and warns when local tools are missing. The pre-push hook checks GitHub Actions dependency policy with Codependence, then runs the Release and sanitizer suites.
+For changes made before the first build, run `./scripts/setup.sh` once. Git does not install repository hooks on clone. The installer migrates the local `.githooks` setting and rejects conflicting hooks without replacing them.
+
+The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The post-merge hook refreshes installed hooks and warns when local tools are missing. The pre-push hook checks GitHub Actions dependency policy with Codependence. CI runs the Release and sanitizer suites.
+
+For GitHub API authentication, pre-push uses `GH_TOKEN` or `GITHUB_TOKEN`, then an existing `gh auth login` session for `api.github.com`. Without credentials, GitHub's anonymous API rate limit applies.
 
 Formatting uses `clang-format --style=file:scripts/.clang-format`. Editor integrations must also use that explicit config path.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --parallel 4 --output-on-failure
 ```
 
 CLI-level fixtures cover each adapter, zero-config and configured policy, rc parity and inheritance, strict advisories, cache reuse and limits, discovery, JSON, and HTML.
@@ -154,7 +159,9 @@ Isolated tests in `tests/unit/` call the import parsers, configuration parser, b
 
 CLI tests live in `tests/e2e/`. API, performance, and hook tests live in `tests/integration/`. Shared inputs and snapshots remain in `tests/fixtures/` and `tests/expected/`.
 
-CTest labels select a group, for example `ctest --test-dir build -L unit --output-on-failure`. Other labels are `e2e`, `integration`, `scripts`, and `performance`; performance tests require a Release build.
+CTest labels select a group, for example `ctest --test-dir build -L unit --output-on-failure`. Other labels are `e2e`, `integration`, `scripts`, `release`, and `performance`; performance tests require a Release build.
+
+Release automation scenarios are separate CTest tests with isolated fixtures. CI and local hook test runs use four workers; run only the release scenarios with `ctest --test-dir build -L release --parallel 4 --output-on-failure`.
 
 ## Releases
 

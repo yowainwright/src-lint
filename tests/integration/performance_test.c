@@ -1,14 +1,20 @@
 #include <errno.h>
+#include <fcntl.h>
+#include <spawn.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
 #define FIXTURE_FILES 10000
-#define TIMING_RUNS 30
+#define WARMUP_RUNS 3
+#define TIMING_RUNS 31
 #define PATH_CAPACITY 4096
+
+extern char **environ;
 
 static bool make_directory(const char *path) { return mkdir(path, 0777) == 0 || errno == EEXIST; }
 
@@ -65,21 +71,21 @@ static bool fixture_ready(const char *root) {
   return create_checked_files(root) && write_file(marker, "10000\n");
 }
 
-static void execute_child(const char *cli, char *const arguments[]) {
-  FILE *sink = fopen("/dev/null", "wb");
-  if (!sink) _exit(127);
-  dup2(fileno(sink), STDOUT_FILENO);
-  dup2(fileno(sink), STDERR_FILENO);
-  execv(cli, arguments);
-  _exit(127);
-}
-
 static int run_process(const char *cli, char *const arguments[]) {
-  const pid_t child = fork();
-  if (child < 0) return -1;
-  if (child == 0) execute_child(cli, arguments);
+  posix_spawn_file_actions_t actions;
+  if (posix_spawn_file_actions_init(&actions) != 0) return -1;
+  int error = posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+  if (error == 0) error = posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
+  pid_t child;
+  if (error == 0) error = posix_spawn(&child, cli, &actions, NULL, arguments, environ);
+  posix_spawn_file_actions_destroy(&actions);
+  if (error != 0) return -1;
   int status;
-  if (waitpid(child, &status, 0) < 0 || !WIFEXITED(status)) return -1;
+  pid_t waited;
+  do {
+    waited = waitpid(child, &status, 0);
+  } while (waited < 0 && errno == EINTR);
+  if (waited < 0 || !WIFEXITED(status)) return -1;
   return WEXITSTATUS(status);
 }
 
@@ -89,15 +95,34 @@ static double elapsed_ms(const struct timespec *start, const struct timespec *en
   return seconds + nanos;
 }
 
-static double average_runtime(const char *cli, char *const arguments[]) {
+static double runtime_ms(const char *cli, char *const arguments[]) {
   struct timespec start;
   struct timespec end;
-  clock_gettime(CLOCK_MONOTONIC, &start);
-  for (size_t index = 0; index < TIMING_RUNS; index += 1) {
+  if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) return -1.0;
+  if (run_process(cli, arguments) != 0) return -1.0;
+  if (clock_gettime(CLOCK_MONOTONIC, &end) != 0) return -1.0;
+  return elapsed_ms(&start, &end);
+}
+
+static int compare_runtime(const void *left, const void *right) {
+  const double a = *(const double *)left;
+  const double b = *(const double *)right;
+  return (a > b) - (a < b);
+}
+
+static double median_runtime(const char *cli, char *const arguments[], const char *label) {
+  for (size_t index = 0; index < WARMUP_RUNS; index += 1) {
     if (run_process(cli, arguments) != 0) return -1.0;
   }
-  clock_gettime(CLOCK_MONOTONIC, &end);
-  return elapsed_ms(&start, &end) / TIMING_RUNS;
+  double samples[TIMING_RUNS];
+  for (size_t index = 0; index < TIMING_RUNS; index += 1) {
+    samples[index] = runtime_ms(cli, arguments);
+    if (samples[index] < 0.0) return -1.0;
+  }
+  qsort(samples, TIMING_RUNS, sizeof(samples[0]), compare_runtime);
+  printf("%s range %.3f–%.3f ms (%d runs)\n", label, samples[0], samples[TIMING_RUNS - 1],
+         TIMING_RUNS);
+  return samples[TIMING_RUNS / 2];
 }
 
 int main(int argc, char **argv) {
@@ -107,9 +132,10 @@ int main(int argc, char **argv) {
   char *help[] = {argv[1], "--help", NULL};
   char *check[] = {argv[1], "check", source, "--format", "json", NULL};
   if (run_process(argv[1], check) != 0) return 2;
-  const double startup = average_runtime(argv[1], help);
-  const double warm_file = average_runtime(argv[1], check);
-  printf("startup %.3f ms, warm one-file %.3f ms\n", startup, warm_file);
+  const double startup = median_runtime(argv[1], help, "startup");
+  const double warm_file = median_runtime(argv[1], check, "warm one-file");
+  printf("median startup %.3f ms (budget 10 ms), warm one-file %.3f ms (budget 50 ms)\n", startup,
+         warm_file);
   const bool within_budgets =
       startup >= 0.0 && startup <= 10.0 && warm_file >= 0.0 && warm_file <= 50.0;
   return within_budgets ? 0 : 1;

@@ -6,7 +6,7 @@ require "json"
 require "open3"
 require "tmpdir"
 
-SOURCE, WORK_ROOT, CLI, VERSION = ARGV
+SOURCE, WORK_ROOT, CLI, VERSION, SCENARIO, DETAIL = ARGV
 TARGETS = %w[darwin-arm64 darwin-amd64 linux-arm64 linux-amd64].freeze
 FileUtils.mkdir_p(WORK_ROOT)
 
@@ -49,7 +49,10 @@ def fixture
 end
 
 def run_release(root, overrides = {}, tag = "v0.1.0")
+  # Fixtures use standard libraries only; skip RubyGems startup for each mocked command.
+  ruby_options = [ENV["RUBYOPT"], "--disable-gems"].compact.join(" ")
   environment = { "PATH" => "#{root}/bin:#{ENV.fetch("PATH")}", "GH_TOKEN" => "test",
+                  "RUBYOPT" => ruby_options,
                   "COMMAND_LOG" => "#{root}/commands.jsonl", "ASSETS" => "#{root}/assets",
                   "INSTALLED_TAP" => "#{root}/installed-tap" }.merge(overrides)
   output, status = Open3.capture2e(environment, "bash", "#{SOURCE}/scripts/release.sh", "homebrew-pr", "#{root}/tap", tag)
@@ -96,48 +99,63 @@ def test_retry
   end
 end
 
-def test_failures
-  ["gh release", "gh attestation", "new-formula src-lint", "brew audit", "brew install", "brew test", "git status", "git commit", "git push"].each do |command|
-    fixture do |root|
-      success, commands, output = run_release(root, "FAIL_COMMAND" => command)
-      check(!success, "accepted #{command} failure: #{output}")
-      check(!called?(commands, "gh", "pr", "create"), "opened PR after #{command} failure")
-      next if command.start_with?("git ")
+def test_command_failure(command)
+  fixture do |root|
+    success, commands, output = run_release(root, "FAIL_COMMAND" => command)
+    check(!success, "accepted #{command} failure: #{output}")
+    check(!called?(commands, "gh", "pr", "create"), "opened PR after #{command} failure")
+    next if command.start_with?("git ")
 
-      check(!called?(commands, "git", "commit"), "committed after #{command} failure")
-      check(!called?(commands, "git", "push"), "pushed after #{command} failure")
-    end
-  end
-  [{ "GH_TOKEN" => "" }, { "DIRTY_TAP" => "1" }, { "DIFF_STATUS" => "2" }, { "RELEASE_METADATA" => "true\tfalse\tv0.1.0" },
-   { "RELEASE_METADATA" => "false\ttrue\tv0.1.0" }, { "RELEASE_METADATA" => "false\tfalse\tv0.2.0" }].each do |overrides|
-    fixture { |root| assert_stopped(root, overrides) }
+    check(!called?(commands, "git", "commit"), "committed after #{command} failure")
+    check(!called?(commands, "git", "push"), "pushed after #{command} failure")
   end
 end
 
-def test_invalid_assets
-  TARGETS.each do |target|
-    fixture do |root|
-      File.delete("#{root}/assets/src-lint-#{target}")
-      assert_stopped(root)
-      check(JSON.parse(File.read("#{root}/tap/brews/src-lint.json"))["managed"] == false, "activated incomplete release")
-    end
+def test_precondition_failure(condition)
+  overrides = case condition
+              when "missing_token" then { "GH_TOKEN" => "" }
+              when "dirty_tap" then { "DIRTY_TAP" => "1" }
+              when "diff_error" then { "DIFF_STATUS" => "2" }
+              when "draft" then { "RELEASE_METADATA" => "true\tfalse\tv0.1.0" }
+              when "prerelease" then { "RELEASE_METADATA" => "false\ttrue\tv0.1.0" }
+              when "wrong_version" then { "RELEASE_METADATA" => "false\tfalse\tv0.2.0" }
+              else abort "unknown precondition: #{condition}"
+              end
+  fixture { |root| assert_stopped(root, overrides) }
+end
+
+def test_missing_asset(target)
+  check(TARGETS.include?(target), "unknown target: #{target}")
+  fixture do |root|
+    File.delete("#{root}/assets/src-lint-#{target}")
+    assert_stopped(root)
+    check(JSON.parse(File.read("#{root}/tap/brews/src-lint.json"))["managed"] == false, "activated incomplete release")
   end
+end
+
+def test_bad_checksum
   fixture do |root|
     File.write("#{root}/assets/src-lint-linux-arm64.sha256", "wrong\n")
     assert_stopped(root)
   end
+end
+
+def test_missing_attestation
   fixture do |root|
     File.delete("#{root}/assets/src-lint-darwin-amd64.sigstore.json")
     assert_stopped(root)
   end
 end
 
-def test_invalid_metadata
+def test_missing_readme
   fixture do |root|
     File.write("#{root}/tap/README.md", "no formula markers\n")
     assert_stopped(root)
     check(JSON.parse(File.read("#{root}/tap/brews/src-lint.json"))["managed"] == false, "changed metadata after README failure")
   end
+end
+
+def test_wrong_repository
   fixture do |root|
     path = "#{root}/tap/brews/src-lint.json"
     File.write(path, File.read(path).sub("yowainwright/src-lint", "unexpected/project"))
@@ -145,20 +163,29 @@ def test_invalid_metadata
   end
 end
 
+def test_invalid_tag(tag)
+  fixture { |root| assert_stopped(root, {}, tag) }
+end
+
 def test_versions
-  %w[0.1.0 v01.1.0 v1.2 v1.2.3-rc1 v1.2.3/branch].each do |tag|
-    fixture { |root| assert_stopped(root, {}, tag) }
-  end
   output, status = Open3.capture2e("bash", "#{SOURCE}/scripts/release.sh", "verify-version", CLI, "v#{VERSION}")
   check(status.success?, output)
   _, status = Open3.capture2e("bash", "#{SOURCE}/scripts/release.sh", "verify-version", CLI, "v99.0.0")
   check(!status.success?, "accepted binary version mismatch")
 end
 
-test_initial_release
-test_retry
-test_failures
-test_invalid_assets
-test_invalid_metadata
-test_versions
-puts "release tests passed"
+case SCENARIO
+when "initial" then test_initial_release
+when "retry" then test_retry
+when "command_failure" then test_command_failure(DETAIL)
+when "precondition_failure" then test_precondition_failure(DETAIL)
+when "missing_asset" then test_missing_asset(DETAIL)
+when "bad_checksum" then test_bad_checksum
+when "missing_attestation" then test_missing_attestation
+when "missing_readme" then test_missing_readme
+when "wrong_repository" then test_wrong_repository
+when "invalid_tag" then test_invalid_tag(DETAIL)
+when "versions" then test_versions
+else abort "unknown release scenario: #{SCENARIO.inspect}"
+end
+puts "release #{SCENARIO} #{DETAIL}: passed"
