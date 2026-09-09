@@ -127,16 +127,17 @@ Release tests generate a 10,000-file repository and enforce the 10 ms startup an
 
 ## Development
 
-Install local tools and Git hooks:
+Install local tools:
 
 ```sh
 brew bundle --file=scripts/Brewfile
-./scripts/setup.sh
 ```
 
 The test suite also requires Ruby for release automation checks. A CLI-only build can use `-DBUILD_TESTING=OFF`.
 
-`scripts/setup.sh` generates `.git/hooks/` from the tracked sources in `scripts/hooks/`. It updates only changed hooks and exits without writing when they are current. It migrates the local `.githooks` setting but rejects other `core.hooksPath` settings without changing them.
+CMake installs Git hooks automatically when configuring a local checkout. It uses `scripts/setup.sh`, which updates changed hooks and leaves current hooks untouched. CI, source archives, and subproject builds skip installation. Set `-DSRC_LINT_INSTALL_GIT_HOOKS=OFF` to keep another hook setup.
+
+For changes made before the first build, run `./scripts/setup.sh` once. Git does not install repository hooks on clone. The installer migrates the local `.githooks` setting and rejects conflicting hooks without replacing them.
 
 The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The post-merge hook refreshes installed hooks and warns when local tools are missing. The pre-push hook checks GitHub Actions dependency policy with Codependence, then runs the Release and sanitizer suites.
 

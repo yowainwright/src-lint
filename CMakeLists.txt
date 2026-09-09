@@ -7,6 +7,22 @@ if(NOT UNIX)
 endif()
 
 option(SRC_LINT_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
+option(SRC_LINT_INSTALL_GIT_HOOKS "Install Git hooks during local configuration" ON)
+
+if(SRC_LINT_INSTALL_GIT_HOOKS
+    AND CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR
+    AND EXISTS "${PROJECT_SOURCE_DIR}/.git"
+    AND NOT "$ENV{CI}" AND NOT "$ENV{GITHUB_ACTIONS}")
+  execute_process(
+    COMMAND "${PROJECT_SOURCE_DIR}/scripts/setup.sh"
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    RESULT_VARIABLE hook_setup_result)
+  if(NOT hook_setup_result STREQUAL "0")
+    message(FATAL_ERROR
+      "Git hook setup failed. Resolve the reported conflict or configure with "
+      "-DSRC_LINT_INSTALL_GIT_HOOKS=OFF to use your existing hook setup.")
+  endif()
+endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
