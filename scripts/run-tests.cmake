@@ -38,6 +38,6 @@ execute_process(
   COMMAND_ERROR_IS_FATAL ANY
 )
 execute_process(
-  COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${BUILD_DIR}" --output-on-failure
+  COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${BUILD_DIR}" --parallel 4 --output-on-failure
   COMMAND_ERROR_IS_FATAL ANY
 )

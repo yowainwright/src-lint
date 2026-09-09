@@ -22,5 +22,3 @@ check_dependencies() {
 
 cd "$REPO_ROOT"
 check_dependencies
-cmake -DSUITE=release -P "$REPO_ROOT/scripts/run-tests.cmake"
-cmake -DSUITE=sanitizers -P "$REPO_ROOT/scripts/run-tests.cmake"

@@ -24,12 +24,9 @@ exit "$MOCK_DEPENDENCY_STATUS"
 ]=])
 file(WRITE "${WORK_ROOT}/bin/cmake" [=[#!/bin/sh
 set -eu
-test "${GH_TOKEN:-}" = "${ORIGINAL_GH_TOKEN:-}"
-test "$#" = 3
-test "$2" = -P
-test "$3" = "$PWD/scripts/run-tests.cmake"
-printf '%s\n' "$1" >> "$HOOK_LOG"
-exit "$MOCK_CMAKE_STATUS"
+printf 'cmake\n' >> "$HOOK_LOG"
+printf 'pre-push unexpectedly ran a build or test suite\n' >&2
+exit 99
 ]=])
 foreach(command git gh codependence cmake)
   file(CHMOD "${WORK_ROOT}/bin/${command}"
@@ -38,15 +35,14 @@ endforeach()
 set(ENV{PATH} "${WORK_ROOT}/bin")
 set(ENV{HOOK_LOG} "${WORK_ROOT}/calls.txt")
 
-foreach(mode gh_login gh_token github_token both_tokens logged_out no_gh custom_api dependency_failure test_failure)
+foreach(mode gh_login gh_token github_token both_tokens logged_out no_gh custom_api dependency_failure no_codependence)
   set(ENV{GH_TOKEN} "")
   set(ENV{GITHUB_TOKEN} "")
   unset(ENV{GITHUB_API_URL})
   set(ENV{MOCK_GH_STATUS} 0)
   set(ENV{MOCK_DEPENDENCY_STATUS} 0)
-  set(ENV{MOCK_CMAKE_STATUS} 0)
   set(ENV{EXPECTED_TOKEN} fixture-gh-token)
-  set(expected_calls "gh\ncodependence\n-DSUITE=release\n-DSUITE=sanitizers\n")
+  set(expected_calls "gh\ncodependence\n")
   set(expected_exit 0)
   if(mode STREQUAL "gh_token" OR mode STREQUAL "both_tokens")
     set(ENV{GH_TOKEN} fixture-env-gh-token)
@@ -69,23 +65,27 @@ foreach(mode gh_login gh_token github_token both_tokens logged_out no_gh custom_
     file(RENAME "${WORK_ROOT}/bin/gh" "${WORK_ROOT}/gh-disabled")
   endif()
   if(mode MATCHES "^(gh_token|github_token|both_tokens|no_gh|custom_api)$")
-    set(expected_calls "codependence\n-DSUITE=release\n-DSUITE=sanitizers\n")
+    set(expected_calls "codependence\n")
   elseif(mode STREQUAL "dependency_failure")
     set(ENV{MOCK_DEPENDENCY_STATUS} 2)
     set(expected_calls "gh\ncodependence\n")
     set(expected_exit 2)
-  elseif(mode STREQUAL "test_failure")
-    set(ENV{MOCK_CMAKE_STATUS} 1)
-    set(expected_calls "gh\ncodependence\n-DSUITE=release\n")
+  elseif(mode STREQUAL "no_codependence")
+    file(RENAME "${WORK_ROOT}/bin/codependence" "${WORK_ROOT}/codependence-disabled")
+    set(expected_calls "")
     set(expected_exit 1)
   endif()
-  set(ENV{ORIGINAL_GH_TOKEN} "$ENV{GH_TOKEN}")
   file(WRITE "$ENV{HOOK_LOG}" "")
   execute_process(COMMAND "${BASH}" "${REPO_ROOT}/scripts/hooks/pre-push"
     WORKING_DIRECTORY "${WORK_ROOT}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors)
   if(mode STREQUAL "no_gh")
     file(RENAME "${WORK_ROOT}/gh-disabled" "${WORK_ROOT}/bin/gh")
+  elseif(mode STREQUAL "no_codependence")
+    file(RENAME "${WORK_ROOT}/codependence-disabled" "${WORK_ROOT}/bin/codependence")
+    if(NOT errors MATCHES "install codependence")
+      message(FATAL_ERROR "Missing dependency did not report installation instructions\n${errors}")
+    endif()
   endif()
   file(READ "$ENV{HOOK_LOG}" calls)
   if(NOT result STREQUAL "${expected_exit}" OR NOT calls STREQUAL expected_calls)

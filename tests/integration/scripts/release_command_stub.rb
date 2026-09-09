@@ -1,8 +1,6 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require "digest"
-require "fileutils"
 require "json"
 
 command = File.basename($PROGRAM_NAME)
@@ -15,6 +13,7 @@ def github_command
   when ["release", "view"]
     puts ENV.fetch("RELEASE_METADATA", "false\tfalse\tv0.1.0")
   when ["release", "download"]
+    require "fileutils"
     destination = ARGV.fetch(ARGV.index("--dir") + 1)
     FileUtils.cp(Dir[File.join(ENV.fetch("ASSETS"), "*")], destination)
   when ["attestation", "verify"]
@@ -33,7 +32,9 @@ end
 def brew_command
   installed = ENV.fetch("INSTALLED_TAP")
   case ARGV.first
-  when "tap" then FileUtils.mkdir_p(File.join(installed, "Formula"))
+  when "tap"
+    require "fileutils"
+    FileUtils.mkdir_p(File.join(installed, "Formula"))
   when "--repository" then puts installed
   when "audit", "install", "test"
     expected = File.read("Formula/src-lint.rb")
@@ -43,6 +44,8 @@ def brew_command
 end
 
 def generate_formula
+  require "digest"
+  require "fileutils"
   abort "wrong generator arguments" unless ARGV == ["src-lint", "0.1.0"]
   data = JSON.parse(File.read("brews/src-lint.json"))
   abort "inactive metadata" unless data.values_at("managed", "readme", "version") == [true, true, "0.1.0"]
