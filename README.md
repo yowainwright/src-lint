@@ -123,7 +123,7 @@ Parsed imports are cached per repository in `.src-lint/cache/`. The default hard
 
 Keys include tool, parser, and cache versions, effective configuration, file path, and source content. Least-recently-used records are trimmed by stored bytes. The cache is safe to delete and ignored by the supplied [`.gitignore`](.gitignore).
 
-Release tests generate a 10,000-file repository and enforce the 10 ms startup and 50 ms warm one-file budgets.
+Release tests generate a 10,000-file repository and enforce the 10 ms startup and 50 ms warm one-file budgets using the median of 31 process runs after three warmups. The benchmark uses `posix_spawn`, reports the timing range, and runs separately from other CTest tests to reduce measurement noise.
 
 ## Development
 
@@ -140,6 +140,8 @@ CMake installs Git hooks automatically when configuring a local checkout. It use
 For changes made before the first build, run `./scripts/setup.sh` once. Git does not install repository hooks on clone. The installer migrates the local `.githooks` setting and rejects conflicting hooks without replacing them.
 
 The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The post-merge hook refreshes installed hooks and warns when local tools are missing. The pre-push hook checks GitHub Actions dependency policy with Codependence, then runs the Release and sanitizer suites.
+
+For GitHub API authentication, pre-push uses `GH_TOKEN` or `GITHUB_TOKEN`, then an existing `gh auth login` session for `api.github.com`. Without credentials, GitHub's anonymous API rate limit applies.
 
 Formatting uses `clang-format --style=file:scripts/.clang-format`. Editor integrations must also use that explicit config path.
 

@@ -36,7 +36,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
   target_compile_options(performance_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME performance_budgets COMMAND performance_test
     $<TARGET_FILE:src-lint> "${CMAKE_CURRENT_BINARY_DIR}/performance-work")
-  set_tests_properties(performance_budgets PROPERTIES LABELS "integration;performance")
+  set_tests_properties(performance_budgets PROPERTIES LABELS "integration;performance" RUN_SERIAL TRUE)
 endif()
 
 add_cli_test(service_boundary_violation service_boundary_violation
@@ -183,6 +183,11 @@ add_test(NAME git_hook_installation COMMAND "${CMAKE_COMMAND}"
   "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/hooks-work"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/scripts/install_git_hooks.cmake")
 set_tests_properties(git_hook_installation PROPERTIES LABELS "integration;scripts")
+add_test(NAME pre_push_hook COMMAND "${CMAKE_COMMAND}"
+  "-DREPO_ROOT=${PROJECT_SOURCE_DIR}"
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/pre-push-work"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/integration/scripts/pre_push_hook.cmake")
+set_tests_properties(pre_push_hook PROPERTIES LABELS "integration;scripts")
 
 find_program(RUBY_EXECUTABLE ruby REQUIRED)
 add_test(NAME release_automation COMMAND "${RUBY_EXECUTABLE}"
