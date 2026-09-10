@@ -187,13 +187,15 @@ add_cli_test(graph_proto graph_language "-DFIXTURE=${FIXTURES}/proto-import" -DL
 
 add_cli_test(cli_usage cli_usage)
 add_cli_test(cli_version cli_version "-DVERSION=${PROJECT_VERSION}")
-add_cli_test(cli_install cli_install
-  "-DBUILD_ROOT=${PROJECT_BINARY_DIR}" "-DBUILD_CONFIG=$<CONFIG>"
-  "-DINSTALL_BINDIR=${CMAKE_INSTALL_BINDIR}"
-  "-DINSTALL_DATAROOTDIR=${CMAKE_INSTALL_DATAROOTDIR}"
-  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/install-work"
-  "-DFIXTURE=${FIXTURE_ROOT}" "-DEXPECTED=${EXPECTED_ROOT}/service_boundary.json"
-  "-DVERSION=${PROJECT_VERSION}")
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  add_cli_test(cli_install cli_install
+    "-DBUILD_ROOT=${PROJECT_BINARY_DIR}" "-DBUILD_CONFIG=$<CONFIG>"
+    "-DINSTALL_BINDIR=${CMAKE_INSTALL_BINDIR}"
+    "-DINSTALL_DATAROOTDIR=${CMAKE_INSTALL_DATAROOTDIR}"
+    "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/install-work"
+    "-DFIXTURE=${FIXTURE_ROOT}" "-DEXPECTED=${EXPECTED_ROOT}/service_boundary.json"
+    "-DVERSION=${PROJECT_VERSION}")
+endif()
 add_cli_test(subproject_install subproject_install
   "-DREPO_ROOT=${PROJECT_SOURCE_DIR}"
   "-DC_COMPILER=${CMAKE_C_COMPILER}"
