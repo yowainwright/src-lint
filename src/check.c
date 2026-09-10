@@ -855,11 +855,6 @@ static bool entry_error(const FTSENT *entry) {
   return entry->fts_info == FTS_ERR || entry->fts_info == FTS_DNR || entry->fts_info == FTS_NS;
 }
 
-static bool config_file_name(const char *name) {
-  return strcmp(name, ".src-lintrc.toml") == 0 || strcmp(name, ".src-lintrc.json") == 0 ||
-         strcmp(name, ".src-lintrc.yaml") == 0 || strcmp(name, ".src-lintrc.yml") == 0;
-}
-
 static bool validate_config_entry(SlContext *context, const char *path) {
   SlConfig config;
   if (!sl_config_load_for_file(path, &config, context->errors)) return false;
@@ -880,7 +875,7 @@ static int scan_entry(SlContext *context, FTSENT *entry) {
     return -1;
   }
   if (entry->fts_info != FTS_F) return 0;
-  if (config_file_name(entry->fts_name)) {
+  if (sl_config_file_for_path(entry->fts_name)) {
     return validate_config_entry(context, entry->fts_path) ? 0 : -1;
   }
   if (!has_source_extension(entry->fts_path)) return 0;

@@ -114,6 +114,12 @@ add_cli_test(extensionless_config extensionless_config
   "-DSOURCE_FIXTURE=${FIXTURES}/config-child"
   "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/extensionless-config"
   "-DEXPECTED=${EXPECTED_ROOT}/config_child.json")
+foreach(name .src-lintrc .src-lintrc.json .src-lintrc.toml .src-lintrc.yaml .src-lintrc.yml)
+  string(MAKE_C_IDENTIFIER "${name}" config_name)
+  add_cli_test("config_without_sources_${config_name}" config_without_sources
+    "-DCONFIG_NAME=${name}"
+    "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/empty-${config_name}")
+endforeach()
 add_json_test(yaml_single_quoted_hash config-yaml-hash config_yaml_hash)
 add_json_test(configured_absolute_polyglot_imports config-absolute config_absolute)
 add_json_test(configured_target_precedes_inference config-target-only config_target_only)
@@ -183,10 +189,15 @@ add_cli_test(cli_usage cli_usage)
 add_cli_test(cli_version cli_version "-DVERSION=${PROJECT_VERSION}")
 add_cli_test(cli_install cli_install
   "-DBUILD_ROOT=${PROJECT_BINARY_DIR}" "-DBUILD_CONFIG=$<CONFIG>"
-  "-DINSTALL_BINDIR=${CMAKE_INSTALL_BINDIR}" "-DINSTALL_DOCDIR=${CMAKE_INSTALL_DOCDIR}"
+  "-DINSTALL_BINDIR=${CMAKE_INSTALL_BINDIR}"
+  "-DINSTALL_DATAROOTDIR=${CMAKE_INSTALL_DATAROOTDIR}"
   "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/install-work"
   "-DFIXTURE=${FIXTURE_ROOT}" "-DEXPECTED=${EXPECTED_ROOT}/service_boundary.json"
   "-DVERSION=${PROJECT_VERSION}")
+add_cli_test(subproject_install subproject_install
+  "-DREPO_ROOT=${PROJECT_SOURCE_DIR}"
+  "-DC_COMPILER=${CMAKE_C_COMPILER}"
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/subproject-install-work")
 add_cli_test(invalid_root invalid_root "-DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME git_hook_installation COMMAND "${CMAKE_COMMAND}"
   "-DREPO_ROOT=${PROJECT_SOURCE_DIR}"

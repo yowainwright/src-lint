@@ -11,7 +11,7 @@ execute_process(
 if(NOT result EQUAL 0)
   message(FATAL_ERROR "Install failed\n${output}\n${errors}")
 endif()
-if(NOT EXISTS "${install_root}/${INSTALL_DOCDIR}/LICENSE")
+if(NOT EXISTS "${install_root}/${INSTALL_DATAROOTDIR}/doc/src-lint/LICENSE")
   message(FATAL_ERROR "Installed license is missing")
 endif()
 

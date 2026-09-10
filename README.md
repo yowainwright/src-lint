@@ -2,7 +2,7 @@
 
 src-lint checks imports between services, packages, and components to catch access to private code.
 
-Where there are other tools that do this, src-lint is aimed at being a pure version that does just this. Hopefully making it very effecient and natural when working in an agentic flow.
+src-lint focuses on import boundaries, with the aim of staying fast and easy to use with coding agents.
 
 [What it checks](#what-it-checks) · [Install](#install) · [CLI](#cli) · [Configuration](#configuration) · [Development](#development) · [Releases](#releases)
 
@@ -200,7 +200,7 @@ Use `src-lint --help` (or `-h`) for command syntax and `src-lint --version` for 
 
 ## Configuration
 
-Configured rules take precedence over defaults. Use one config file per directory:
+Configured rules take precedence over defaults. Use one config file per directory. If a check finds two or more supported rc files in the same directory, it exits with configuration error `2`:
 
 | Filename | Format |
 | --- | --- |
@@ -272,7 +272,7 @@ Run `src-lint check services/orders`. Imports from `billing/api/` now fail; impo
 +import { listProtoEntries } from "../billing/proto/index.ts";
 ```
 
-Child arrays replace parent arrays; other settings are inherited. See the [nested config fixture](tests/fixtures/config-child).
+Child scalar values and arrays replace parent values; omitted settings are inherited. See the [nested config fixture](tests/fixtures/config-child).
 
 <details>
 <summary>Configuration inheritance rules</summary>

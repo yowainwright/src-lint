@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 3.20)
 
 project(src_lint VERSION 0.1.0 LANGUAGES C)
 
-include(GNUInstallDirs)
-
 if(NOT UNIX)
   message(FATAL_ERROR "The first import slice requires POSIX fts and realpath")
 endif()
@@ -49,8 +47,11 @@ add_executable(src-lint src/main.c)
 target_link_libraries(src-lint PRIVATE src_lint_core)
 target_compile_definitions(src-lint PRIVATE SRC_LINT_VERSION="${PROJECT_VERSION}")
 
-install(TARGETS src-lint RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  include(GNUInstallDirs)
+  install(TARGETS src-lint RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/src-lint")
+endif()
 
 target_compile_options(src_lint_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_compile_options(src-lint PRIVATE -Wall -Wextra -Wpedantic -Werror)
