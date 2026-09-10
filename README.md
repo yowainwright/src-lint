@@ -1,62 +1,311 @@
 # src-lint
 
-src-lint is a fast, standalone architecture-conformance linter for imports that cross intended service, component, package, or Proto boundaries.
+src-lint checks imports between services, packages, and components to catch access to private code.
 
-## Boundary policy
+Where there are other tools that do this, src-lint is aimed at being a pure version that does just this. Hopefully making it very effecient and natural when working in an agentic flow.
 
-With no rc file, the CLI treats sibling directories under `services/<name>` as boundaries. Cross-service imports may target `api/`, `public/`, or `proto/`; direct traversal into other paths fails with `SL1001`.
+[What it checks](#what-it-checks) · [Install](#install) · [CLI](#cli) · [Configuration](#configuration) · [Development](#development) · [Releases](#releases)
 
-| Source | Imports recognized |
-| --- | --- |
-| TypeScript and JavaScript | Static imports, re-exports, dynamic `import()`, and `require()` |
-| Python | `from … import …` and `import …` |
-| Go | Single and grouped imports |
-| Proto | Regular, `public`, and `weak` imports |
+## What it checks
 
-Explicit policy takes precedence over inference. Unresolved local imports are `SL2001` advisories by default and errors under `--strict`.
+By default, each `services/<name>` directory is a boundary. Other services can import from its `api/`, `public/`, or `proto/` paths.
 
-JavaScript and TypeScript directory imports resolve through supported `index` files. An existing directory alone does not count as a resolved module.
+Importing private code reports `SL1001`. Unresolved local imports report `SL2001` as an advisory; `--strict` makes them errors.
 
-## Examples
-
-Cross-boundary imports should use an entry exposed through `api/`, `public/`, or `proto/`. Direct imports from an owner's internal implementation produce `SL1001`.
+Supports TypeScript, JavaScript, Python, Go, and Proto so far. More languages are welcome and appreciated.
 
 ### TypeScript and JavaScript
+
+Given this layout, `orders` can import `billing/api/index.ts` but cannot import `billing/internal/ledger.ts`:
+
+```text
+services/
+├── orders/
+│   └── create.ts
+└── billing/
+    ├── api/index.ts
+    └── internal/ledger.ts
+```
+
+The public API file can expose a function from the same service's internals. In `services/billing/api/index.ts`:
+
+```ts
+export { postEntry } from "../internal/ledger";
+```
+
+Then, in `services/orders/create.ts`:
 
 ```diff
 -import { postEntry } from "../billing/internal/ledger";
 +import { postEntry } from "../billing/api";
 ```
 
+See the [working fixture](tests/fixtures/service-boundary/services/orders/create.ts) and its [expected finding](tests/expected/service_boundary.json).
+
+JavaScript and TypeScript directory imports need a supported `index` file, such as `index.ts`. An empty directory does not resolve.
+
 ### Python
+
+Use the public module instead of the internal one:
 
 ```diff
 -from services.billing.internal import ledger
 +from services.billing.api import ledger
 ```
 
+See the [Python fixture](tests/fixtures/python-absolute/services/orders/create.py).
+
 ### Go
+
+Import the API package instead of its internal implementation:
 
 ```diff
 -import "example.com/repo/services/billing/internal/ledger"
 +import "example.com/repo/services/billing/api"
 ```
 
+See the [Go fixture](tests/fixtures/go-single/services/orders/create.go).
+
 ### Proto
+
+Import a file from the service's `proto/` directory:
 
 ```diff
 -import "services/billing/internal/ledger.proto";
 +import public "services/billing/proto/public.proto";
 ```
 
-## Build
+The `proto/` path makes this import allowed. See the [Proto fixture](tests/fixtures/proto-import/services/orders/proto/order.proto).
 
-The executable is C11 and has no runtime dependency. POSIX `fts` and `realpath` are currently required.
+<details>
+<summary>Recognized import syntax</summary>
+
+| Language | Imports recognized |
+| --- | --- |
+| TypeScript and JavaScript | Static imports, re-exports, dynamic `import()`, and `require()` |
+| Python | `from … import …` and `import …` |
+| Go | Single and grouped imports |
+| Proto | Regular, `public`, and `weak` imports |
+
+</details>
+
+## Install
+
+### Homebrew
+
+The [release workflow](.github/workflows/release.yml) builds macOS and Linux binaries for ARM64 and AMD64, then opens a Homebrew tap PR. The first release and formula are not published yet. Once available:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
+brew install yowainwright/tap/src-lint
+src-lint --version
 ```
+
+### Build and install locally
+
+Requires CMake 3.20+ and a C11 compiler on macOS or Linux. This installs the binary and license under `build/install/`:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_TESTING=OFF -DSRC_LINT_INSTALL_GIT_HOOKS=OFF
+cmake --build build --parallel
+cmake --install build --prefix ./build/install
+export PATH="$PWD/build/install/bin:$PATH"
+src-lint --version
+```
+
+Choose another install directory with `--prefix`. The binary uses the system C library; no separate src-lint library or language runtime is needed. See [CMakeLists.txt](CMakeLists.txt).
+
+## CLI
+
+Run from the repository you want to check. These examples use the [included fixture](tests/fixtures/service-boundary), so run them from the src-lint checkout.
+
+| Command | Result |
+| --- | --- |
+| `src-lint check [path] [--strict] [--format text\|json]` | Report import violations |
+| `src-lint discover [path] [--format text\|json]` | List boundaries and source-file counts |
+| `src-lint graph [path] [--format json\|html]` | Export dependencies as JSON or an interactive HTML graph |
+
+### `src-lint check`
+
+Check a file or directory. With no path, check the current directory:
+
+```sh
+src-lint check tests/fixtures/service-boundary
+```
+
+```text
+services/orders/create.ts:1:28 SL1001 orders cannot import billing internals -> services/billing/internal/ledger.ts
+```
+
+The command exits with `1`. The private import fails; the public API import in the same file passes. The output gives the file, line, column, rule, and rejected target.
+
+Use JSON for scripts and `--strict` to make unresolved imports errors:
+
+```sh
+src-lint check tests/fixtures/service-boundary --strict --format json
+```
+
+The result contains a `findings` array. Each boundary violation includes `rule`, `source`, `line`, `column`, `sourceBoundary`, `targetBoundary`, and `target`. See the [complete JSON result](tests/expected/service_boundary.json).
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `[path]` | Source file or directory to check | `.` |
+| `--strict` | Treat unresolved local imports (`SL2001`) as errors | Off, unless enabled in config |
+| `--format text\|json` | Human-readable diagnostics or JSON | `text` |
+
+### `src-lint discover`
+
+List boundaries and the number of source files in each:
+
+```sh
+src-lint discover tests/fixtures/service-boundary
+```
+
+```text
+billing services/billing inferred 2 files
+orders services/orders inferred 1 file
+```
+
+Each row shows the name, root, whether the boundary was configured or inferred, and file count. Use `--format json` for a [`boundaries` array](tests/expected/discover.json). This fixture exits with `1` because it contains a violation. `--strict` is not accepted by this command.
+
+### `src-lint graph`
+
+Export imports as JSON, or save an interactive HTML graph:
+
+```sh
+src-lint graph tests/fixtures/service-boundary --format json > dependency-graph.json
+src-lint graph tests/fixtures/service-boundary --format html > dependency-graph.html
+```
+
+Open `dependency-graph.html` in a browser to filter boundaries, pan, and zoom. JSON is the default format; `text` and `--strict` are not supported.
+
+| JSON field | Meaning |
+| --- | --- |
+| `nodes` | Source files, each with an `id` and owning `boundary` |
+| `edges` | Imports, with `from`, `to`, source coordinates, and language |
+| `status` | Whether an edge is allowed, a violation, an advisory, or an error |
+| `suggestedPublicEntry` | Suggested public path for a violation, or `null` |
+
+The [sample graph](tests/expected/graph.json) has one allowed edge and one violation. Both exports exit with `1` for this fixture and still write the graph.
+
+### Help and exit codes
+
+Use `src-lint --help` (or `-h`) for command syntax and `src-lint --version` for the installed version.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | No errors or boundary violations; unresolved advisories may remain |
+| `1` | Boundary violations or unresolved imports treated as errors |
+| `2` | Invalid arguments, invalid config, or a failed operation |
+
+## Configuration
+
+Configured rules take precedence over defaults. Use one config file per directory:
+
+| Filename | Format |
+| --- | --- |
+| `.src-lintrc` or `.src-lintrc.json` | JSON |
+| `.src-lintrc.toml` | TOML |
+| `.src-lintrc.yaml` or `.src-lintrc.yml` | YAML |
+
+### Define public paths
+
+Save this as `.src-lintrc` at your repository root:
+
+```json
+{
+  "version": 1,
+  "strict": false,
+  "cache": { "max_mib": 8 },
+  "boundaries": {
+    "orders": {
+      "root": "services/orders",
+      "allow": ["shared/**"]
+    },
+    "billing": {
+      "root": "services/billing",
+      "public": ["api/**", "proto/**"]
+    }
+  }
+}
+```
+
+Run `src-lint check .`. Here, `orders` may import from `shared/**`, and `billing` exposes `api/**` and `proto/**`. An import from `orders` into `billing/internal/` still fails with `SL1001`.
+
+| Setting | Meaning | Default |
+| --- | --- | --- |
+| `version` | Config format version | `1`; no other version is accepted |
+| `strict` | Treat unresolved local imports as errors | `false` |
+| `cache.max_mib` | Cache limit in MiB; `0` disables caching | `8` |
+| `boundaries.<name>.root` | Boundary directory, relative to the repository | Required for each boundary |
+| `boundaries.<name>.public` | Paths others may import, relative to this boundary's root | No public paths when configured |
+| `boundaries.<name>.allow` | Extra paths this boundary may import, relative to the repository | No exceptions |
+
+Patterns must be exact paths or prefixes ending in `/**`; `*.ts` and `api/*` are invalid. Change `root` to use directories such as `packages/billing` or `components/billing`. The same settings work in [TOML](tests/fixtures/config-toml/.src-lintrc.toml) and [YAML](tests/fixtures/config-yaml/.src-lintrc.yaml).
+
+### Allow a specific private import
+
+In the config above, change `boundaries.orders.allow` to:
+
+```json
+["shared/**", "services/billing/internal/ledger.ts"]
+```
+
+Run `src-lint check services/orders`. The import of `../billing/internal/ledger` now passes. Other boundaries still cannot import that private file. See the [exception fixture](tests/fixtures/config-allow).
+
+### Override a rule in one directory
+
+Starting with the basic config, add `services/orders/.src-lintrc`:
+
+```json
+{
+  "boundaries": {
+    "billing": { "public": ["proto/**"] }
+  }
+}
+```
+
+Run `src-lint check services/orders`. Imports from `billing/api/` now fail; imports from `billing/proto/` pass:
+
+```diff
+-import { listEntries } from "../billing/api/index.ts";
++import { listProtoEntries } from "../billing/proto/index.ts";
+```
+
+Child arrays replace parent arrays; other settings are inherited. See the [nested config fixture](tests/fixtures/config-child).
+
+<details>
+<summary>Configuration inheritance rules</summary>
+
+Boundaries merge by name. Config files along the imported path apply public-entry rules after importer-side overrides. Shared ancestors apply once. Only the importing boundary can grant `allow` exceptions.
+
+</details>
+
+### Cache
+
+Parsed imports are cached in `.src-lint/cache/`, up to 8 MiB by default. Set `cache.max_mib = 0` to disable caching. The cache is safe to delete and covered by [`.gitignore`](.gitignore).
+
+## Development
+
+Install local tools and run the tests:
+
+```sh
+brew bundle --file=scripts/Brewfile
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+cmake --build build --parallel
+ctest --test-dir build --parallel 4 --output-on-failure
+```
+
+Format C with `clang-format --style=file:scripts/.clang-format`; use the same config in your editor. See [contributing](.github/CONTRIBUTING.md) and [tests](tests).
+
+<details>
+<summary>Hooks and additional tests</summary>
+
+Run `./scripts/setup.sh` to install hooks before your first build. The [hooks](scripts/hooks) check formatting and Debug tests before commits, refresh after merges, and check dependencies with Codependence before pushes. Pre-push uses `GH_TOKEN`, `GITHUB_TOKEN`, or your `gh auth login` session; anonymous requests are rate-limited.
+
+Run one test group with `ctest --test-dir build -L unit --output-on-failure`. Other labels are `e2e`, `integration`, `scripts`, `release`, and `performance`. Performance tests require a Release build.
+
+Run sanitizer checks:
 
 ```sh
 cmake -S . -B build-asan -DSRC_LINT_SANITIZERS=ON
@@ -64,128 +313,21 @@ cmake --build build-asan --parallel
 ctest --test-dir build-asan --output-on-failure
 ```
 
-## Usage
+[CI](.github/workflows/ci.yml) runs Release and sanitizer tests. [Performance tests](tests/integration/performance_test.c) check 10 ms startup and 50 ms warm one-file budgets on a 10,000-file repository. CI enforces those budgets on Ubuntu 24.04 x64; local Release tests include them too.
 
-```text
-src-lint --version
-src-lint check [path] [--strict] [--format text|json]
-src-lint discover [path] [--format text|json]
-src-lint graph [path] [--format json|html]
-```
-
-```sh
-./build/src-lint check services/orders --strict --format json
-./build/src-lint discover . --format json
-./build/src-lint graph . --format json > dependency-graph.json
-./build/src-lint graph . --format html > dependency-graph.html
-```
-
-`discover` reports configured or inferred boundaries with source-file counts. JSON graph output contains deterministic nodes and edges. Violation edges carry source coordinates, source and target ownership, the rule, and a suggested public entry. HTML output is a self-contained boundary filter and pan-and-zoom dependency canvas.
-
-Exit code `0` means clean, `1` means policy findings exist, and `2` means invalid input, configuration, or operation.
-
-## Configuration
-
-Place one rc file at the repository root:
-
-- `.src-lintrc.toml`
-- `.src-lintrc.json`
-- `.src-lintrc.yaml`
-- `.src-lintrc.yml`
-
-All formats use the same model. More than one recognized rc file in a directory is invalid.
-
-```toml
-version = 1
-strict = false
-
-[cache]
-max_mib = 8
-
-[boundaries.orders]
-root = "services/orders"
-allow = ["shared/**"]
-
-[boundaries.billing]
-root = "services/billing"
-public = ["api/**", "proto/**"]
-```
-
-A nested rc file inherits its ancestors within the repository. Boundary maps merge by name. Child scalar and array values replace parent values.
-
-`allow` belongs to the importing boundary and matches repository-relative targets. `public` belongs to the imported boundary and matches paths inside it. Entries are exact paths or prefixes ending in `/**`; other wildcard forms are invalid.
-
-Public-entry policy also includes nested rc files along the imported path, applied after importer-side overrides. Shared ancestor files are applied once. The importing boundary's `allow` rules remain explicit exceptions; target-side rc files cannot grant those exceptions.
-
-## Cache
-
-Parsed imports are cached per repository in `.src-lint/cache/`. The default hard limit is 8 MiB; `cache.max_mib = 0` disables it.
-
-Keys include tool, parser, and cache versions, effective configuration, file path, and source content. Least-recently-used records are trimmed by stored bytes. The cache is safe to delete and ignored by the supplied [`.gitignore`](.gitignore).
-
-Release tests generate a 10,000-file repository and enforce the 10 ms startup and 50 ms warm one-file budgets using the median of 31 process runs after three warmups. The benchmark uses `posix_spawn`, reports the timing range, and runs separately from other CTest tests to reduce measurement noise.
-
-CI and release workflows run functional tests on all four platforms and enforce timing budgets separately on the Ubuntu 24.04 x64 reference runner. They use [CTest label filters](https://cmake.org/cmake/help/latest/manual/ctest.1.html#label-matching) to select the existing `performance` tests. Local Release test runs include both groups.
-
-## Development
-
-Install local tools:
-
-```sh
-brew bundle --file=scripts/Brewfile
-```
-
-The test suite also requires Ruby for release automation checks. A CLI-only build can use `-DBUILD_TESTING=OFF`.
-
-CMake installs Git hooks automatically when configuring a local checkout. It uses `scripts/setup.sh`, which updates changed hooks and leaves current hooks untouched. CI, source archives, and subproject builds skip installation. Set `-DSRC_LINT_INSTALL_GIT_HOOKS=OFF` to keep another hook setup.
-
-For changes made before the first build, run `./scripts/setup.sh` once. Git does not install repository hooks on clone. The installer migrates the local `.githooks` setting and rejects conflicting hooks without replacing them.
-
-The pre-commit hook checks staged whitespace and C formatting, then runs the Debug test suite. The post-merge hook refreshes installed hooks and warns when local tools are missing. The pre-push hook checks GitHub Actions dependency policy with Codependence. CI runs the Release and sanitizer suites.
-
-For GitHub API authentication, pre-push uses `GH_TOKEN` or `GITHUB_TOKEN`, then an existing `gh auth login` session for `api.github.com`. Without credentials, GitHub's anonymous API rate limit applies.
-
-Formatting uses `clang-format --style=file:scripts/.clang-format`. Editor integrations must also use that explicit config path.
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --parallel
-ctest --test-dir build --parallel 4 --output-on-failure
-```
-
-CLI-level fixtures cover each adapter, zero-config and configured policy, rc parity and inheritance, strict advisories, cache reuse and limits, discovery, JSON, and HTML.
-
-Isolated tests in `tests/unit/` call the import parsers, configuration parser, boundary matchers, and graph functions with in-memory inputs. They cover source coordinates, ignored syntax, rc format parity and inheritance, policy hashes, path segments, and graph ownership and serialization. Assertions run in Release builds and the test code is instrumented in sanitizer builds.
-
-CLI tests live in `tests/e2e/`. API, performance, and hook tests live in `tests/integration/`. Shared inputs and snapshots remain in `tests/fixtures/` and `tests/expected/`.
-
-CTest labels select a group, for example `ctest --test-dir build -L unit --output-on-failure`. Other labels are `e2e`, `integration`, `scripts`, `release`, and `performance`; performance tests require a Release build.
-
-Release automation scenarios are separate CTest tests with isolated fixtures. CI and local hook test runs use four workers; run only the release scenarios with `ctest --test-dir build -L release --parallel 4 --output-on-failure`.
+</details>
 
 ## Releases
 
-[`release.yml`](.github/workflows/release.yml) follows the [fs-lint release workflow](https://github.com/yowainwright/fs-lint/blob/main/.github/workflows/release.yml). A pushed `vMAJOR.MINOR.PATCH` tag must point to a commit on `main` and match `project(src_lint VERSION ...)` in `CMakeLists.txt`. That version also supplies `src-lint --version` and the parser cache's tool version.
+The [release workflow](.github/workflows/release.yml) publishes source and macOS/Linux binaries for ARM64 and AMD64, with checksums and provenance attestations.
 
-The workflow tests native macOS and Linux builds for ARM64 and AMD64, runs the sanitizer suite, then publishes the source archive, four binaries named `src-lint-{darwin,linux}-{arm64,amd64}`, SHA256 files, and binary provenance attestations.
+<details>
+<summary>Maintainer setup and retries</summary>
 
-Homebrew automation uses `yowainwright/homebrew-tap`'s `brews/src-lint.json`, `scripts/new-formula`, and `scripts/update-formula`. It verifies every binary's checksum and [attestation](https://cli.github.com/manual/gh_attestation_verify), checks the host binary's version, generates the formula, runs Homebrew audit/install/test, and opens a tap PR. The inactive inventory becomes managed only after release verification; the formula's downloaded checksums must still match the verified binaries.
+Tags use `vMAJOR.MINOR.PATCH`, must point to a commit on `main`, and must match the version in [CMakeLists.txt](CMakeLists.txt).
 
-Before the first Homebrew update, the tap's inventory and CI changes must be merged. Configure the src-lint repository secret `HOMEBREW_TAP_TOKEN` with a fine-grained token restricted to `yowainwright/homebrew-tap`, granting Contents and Pull requests write access. Protect `main` and release tags, and require tap CI before merging formula PRs.
+Before Homebrew updates, merge the tap's inventory and CI setup. Set `HOMEBREW_TAP_TOKEN` to a fine-grained token limited to `yowainwright/homebrew-tap`, with Contents and Pull requests write access. Protect `main` and release tags, and require tap CI before merging formula PRs.
 
-If GitHub publication succeeds but Homebrew fails, run the Release workflow manually from `main` with the existing tag. This retries Homebrew using the release scripts on `main`; it does not rebuild or replace published assets. The retry reuses an existing tap branch and open PR.
+[Release scripts](scripts/release.sh) verify binaries, test the Homebrew formula, and open a tap PR. If Homebrew fails after publication, rerun the Release workflow from `main` with the existing tag. It reuses the tap PR without replacing published assets.
 
-## Competitive landscape
-
-src-lint turns intended dependency boundaries into executable policy. It protects service, component, package, and Proto ownership from accidental changes by humans and AI.
-
-Its focus is a fast, local, polyglot intent graph with advisory discovery, deterministic enforcement, and progressive visualization.
-
-_Landscape reviewed July 2026._
-
-| Reference | Existing strength | src-lint's intended distinction |
-| --- | --- | --- |
-| [archlint](https://github.com/muhammetsafak/archlint) | Import boundaries for Go, TypeScript, and Python; bounded contexts; public ports; executable ADRs | AST-backed analysis, Proto support, nested provider-owned boundaries, advisory discovery, and an interactive graph |
-| [structurelint](https://github.com/Jonathangadeaharder/structurelint) | Polyglot import graphs, architectural layers, cascading configuration, and automatic project detection | A focused architecture-conformance tool with monorepo semantics, explicit public entries, and boundary ownership |
-| [Dependency Cruiser](https://github.com/sverweij/dependency-cruiser) | JavaScript and TypeScript rules, cycle checks, caching, and graph exports | One policy and graph spanning TypeScript, JavaScript, Python, Go, and Proto |
-| [Nx module boundaries](https://nx.dev/docs/features/enforce-module-boundaries) | Monorepo tags, public APIs, cycle detection, and project graphs | Build-system-independent enforcement for nested boundaries within and across projects |
+</details>

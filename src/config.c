@@ -930,11 +930,12 @@ static bool regular_file(const char *path) {
 }
 
 static int config_in_directory(const char *directory, char *path) {
-  const char *names[] = {".src-lintrc.toml", ".src-lintrc.json", ".src-lintrc.yaml",
-                         ".src-lintrc.yml"};
+  const char *const names[] = {".src-lintrc", ".src-lintrc.toml", ".src-lintrc.json",
+                               ".src-lintrc.yaml", ".src-lintrc.yml"};
+  const size_t count = sizeof(names) / sizeof(*names);
   int found = 0;
   path[0] = '\0';
-  for (size_t index = 0; index < 4; index += 1) {
+  for (size_t index = 0; index < count; index += 1) {
     char candidate[SL_PATH_CAPACITY];
     const int written = snprintf(candidate, sizeof(candidate), "%s/%s", directory, names[index]);
     if (written < 0 || (size_t)written >= sizeof(candidate)) return -1;
@@ -1025,7 +1026,8 @@ static bool path_ends_with(const char *path, const char *suffix) {
 }
 
 bool sl_config_parse(const char *path, char *content, SlConfig *config, FILE *errors) {
-  if (path_ends_with(path, ".json")) return parse_json(path, content, config, errors);
+  const bool json = path_ends_with(path, ".json") || path_ends_with(path, ".src-lintrc");
+  if (json) return parse_json(path, content, config, errors);
   const bool yaml = path_ends_with(path, ".yaml") || path_ends_with(path, ".yml");
   if (yaml) return parse_yaml(path, content, config, errors);
   return parse_toml(path, content, config, errors);
