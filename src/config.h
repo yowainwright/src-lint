@@ -8,6 +8,19 @@
 
 #define SL_DEFAULT_CACHE_BYTES (8U * 1024U * 1024U)
 
+typedef enum { SL_CONFIG_JSON, SL_CONFIG_TOML, SL_CONFIG_YAML } SlConfigFormat;
+
+typedef struct {
+  const char *name;
+  SlConfigFormat format;
+} SlConfigFile;
+
+extern const SlConfigFile sl_config_files[];
+extern const size_t sl_config_file_count;
+
+/* Find a supported rc filename, optionally preceded by a directory path. */
+const SlConfigFile *sl_config_file_for_path(const char *path);
+
 typedef struct {
   char **items;
   size_t count;
@@ -38,7 +51,7 @@ typedef struct {
 
 void sl_config_init(SlConfig *config);
 void sl_config_free(SlConfig *config);
-/* Apply one rc layer to an initialized config, modifying content in place.
+/* Apply one supported rc file to an initialized config, modifying content in place.
  * This does not validate the merged policy; free the config after a parse failure. */
 bool sl_config_parse(const char *path, char *content, SlConfig *config, FILE *errors);
 bool sl_config_load_for_file(const char *file_path, SlConfig *config, FILE *errors);

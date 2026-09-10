@@ -6,6 +6,24 @@
 #include <string.h>
 #include <sys/stat.h>
 
+const SlConfigFile sl_config_files[] = {
+    {".src-lintrc", SL_CONFIG_JSON},      {".src-lintrc.toml", SL_CONFIG_TOML},
+    {".src-lintrc.json", SL_CONFIG_JSON}, {".src-lintrc.yaml", SL_CONFIG_YAML},
+    {".src-lintrc.yml", SL_CONFIG_YAML},
+};
+
+const size_t sl_config_file_count = sizeof(sl_config_files) / sizeof(*sl_config_files);
+
+const SlConfigFile *sl_config_file_for_path(const char *path) {
+  const char *slash = strrchr(path, '/');
+  const char *name = path;
+  if (slash) name = slash + 1;
+  for (size_t index = 0; index < sl_config_file_count; index += 1) {
+    if (strcmp(name, sl_config_files[index].name) == 0) return &sl_config_files[index];
+  }
+  return NULL;
+}
+
 typedef enum { SL_CONFIG_ROOT, SL_CONFIG_CACHE, SL_CONFIG_BOUNDARY } SlConfigSection;
 
 typedef struct {
@@ -930,13 +948,12 @@ static bool regular_file(const char *path) {
 }
 
 static int config_in_directory(const char *directory, char *path) {
-  const char *names[] = {".src-lintrc.toml", ".src-lintrc.json", ".src-lintrc.yaml",
-                         ".src-lintrc.yml"};
   int found = 0;
   path[0] = '\0';
-  for (size_t index = 0; index < 4; index += 1) {
+  for (size_t index = 0; index < sl_config_file_count; index += 1) {
     char candidate[SL_PATH_CAPACITY];
-    const int written = snprintf(candidate, sizeof(candidate), "%s/%s", directory, names[index]);
+    const int written =
+        snprintf(candidate, sizeof(candidate), "%s/%s", directory, sl_config_files[index].name);
     if (written < 0 || (size_t)written >= sizeof(candidate)) return -1;
     if (!regular_file(candidate)) continue;
     found += 1;
@@ -1017,17 +1034,14 @@ static bool set_repository_root(SlConfig *config, const char *config_path) {
   return true;
 }
 
-static bool path_ends_with(const char *path, const char *suffix) {
-  const size_t path_length = strlen(path);
-  const size_t suffix_length = strlen(suffix);
-  if (suffix_length > path_length) return false;
-  return strcmp(path + path_length - suffix_length, suffix) == 0;
-}
-
 bool sl_config_parse(const char *path, char *content, SlConfig *config, FILE *errors) {
-  if (path_ends_with(path, ".json")) return parse_json(path, content, config, errors);
-  const bool yaml = path_ends_with(path, ".yaml") || path_ends_with(path, ".yml");
-  if (yaml) return parse_yaml(path, content, config, errors);
+  const SlConfigFile *file = sl_config_file_for_path(path);
+  if (!file) {
+    config_error(errors, path, 1, "unsupported configuration filename");
+    return false;
+  }
+  if (file->format == SL_CONFIG_JSON) return parse_json(path, content, config, errors);
+  if (file->format == SL_CONFIG_YAML) return parse_yaml(path, content, config, errors);
   return parse_toml(path, content, config, errors);
 }
 

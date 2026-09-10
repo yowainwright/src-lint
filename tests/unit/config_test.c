@@ -8,6 +8,16 @@ typedef struct {
   const char *clear;
 } ConfigCase;
 
+static const char json_parent[] =
+    "{\"version\":1,\"strict\":true,\"cache\":{\"max_mib\":2},\"boundaries\":{\"billing\":{"
+    "\"root\":\"services/billing\",\"public\":[\"api/**\",\"proto/**\"],\"allow\":[\"shared/"
+    "**\"]}}}";
+static const char json_child[] =
+    "{\"strict\":false,\"cache\":{\"max_mib\":0},\"boundaries\":{\"billing\":{"
+    "\"public\":[\"public/**\"]},\"orders\":{\"root\":\"services/orders\"}}}";
+static const char json_clear[] =
+    "{\"boundaries\":{\"billing\":{\"root\":\"domains/billing\",\"public\":[],\"allow\":[]}}}";
+
 static const ConfigCase formats[] = {
     {".src-lintrc.toml",
      "version = 1\nstrict = true\n[cache]\nmax_mib = 2\n"
@@ -16,14 +26,7 @@ static const ConfigCase formats[] = {
      "strict = false\n[cache]\nmax_mib = 0\n[boundaries.billing]\npublic = [\"public/**\"]\n"
      "[boundaries.orders]\nroot = \"services/orders\"\n",
      "[boundaries.billing]\nroot = \"domains/billing\"\npublic = []\nallow = []\n"},
-    {".src-lintrc.json",
-     "{\"version\":1,\"strict\":true,\"cache\":{\"max_mib\":2},\"boundaries\":{\"billing\":{"
-     "\"root\":\"services/billing\",\"public\":[\"api/**\",\"proto/**\"],\"allow\":[\"shared/"
-     "**\"]}}}",
-     "{\"strict\":false,\"cache\":{\"max_mib\":0},\"boundaries\":{\"billing\":{\"public\":["
-     "\"public/**\"]},"
-     "\"orders\":{\"root\":\"services/orders\"}}}",
-     "{\"boundaries\":{\"billing\":{\"root\":\"domains/billing\",\"public\":[],\"allow\":[]}}}"},
+    {".src-lintrc.json", json_parent, json_child, json_clear},
     {".src-lintrc.yaml",
      "version: 1\nstrict: true\ncache:\n  max_mib: 2\nboundaries:\n  billing:\n"
      "    root: services/billing\n    public:\n      - api/**\n      - proto/**\n"
@@ -31,6 +34,7 @@ static const ConfigCase formats[] = {
      "strict: false\ncache:\n  max_mib: 0\nboundaries:\n  billing:\n    public: [\"public/**\"]\n"
      "  orders:\n    root: services/orders\n",
      "boundaries:\n  billing:\n    root: domains/billing\n    public: []\n    allow: []\n"},
+    {".src-lintrc", json_parent, json_child, json_clear},
 };
 
 static void apply_layer(SlConfig *config, const char *path, const char *source) {
@@ -166,8 +170,10 @@ static void invalid_json_reports_errors(void) {
                         "{\"boundaries\":{\"billing\":{\"root\":\"\\u12",
                         "{\"boundaries\":{\"billing\":{\"root\":\"\\u0000\"}}}",
                         "{\"boundaries\":{\"billing\":{\"root\":\"\\ud800\"}}}"};
-  for (size_t index = 0; index < COUNT(json); index += 1)
+  for (size_t index = 0; index < COUNT(json); index += 1) {
     check_invalid(".src-lintrc.json", json[index], "invalid JSON configuration");
+    check_invalid(".src-lintrc", json[index], "invalid JSON configuration");
+  }
 }
 
 static void invalid_yaml_reports_errors(void) {
