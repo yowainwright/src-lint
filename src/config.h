@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define SL_DEFAULT_CACHE_BYTES (8U * 1024U * 1024U)
+#define SL_DEFAULT_CACHE_BYTES 0
 
 typedef enum { SL_CONFIG_JSON, SL_CONFIG_TOML, SL_CONFIG_YAML } SlConfigFormat;
 

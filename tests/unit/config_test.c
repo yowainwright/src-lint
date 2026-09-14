@@ -46,7 +46,7 @@ static void apply_layer(SlConfig *config, const char *path, const char *source) 
 
 static void check_defaults(const SlConfig *config) {
   CHECK(config->version == 1);
-  CHECK(config->cache_max_bytes == 8U * 1024U * 1024U);
+  CHECK(config->cache_max_bytes == 0);
   CHECK(!config->strict && !config->present);
   CHECK(!config->version_set && !config->strict_set && !config->cache_set);
   CHECK(config->boundaries == NULL && config->boundary_count == 0);
