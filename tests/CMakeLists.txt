@@ -54,10 +54,15 @@ add_cli_test(scoped_repository_path_containing_services service_boundary_violati
   "-DFIXTURE=${NESTED_ROOT}" "-DSCOPE=${NESTED_ROOT}/services/orders")
 add_json_test(service_boundary_json service-boundary service_boundary)
 
-foreach(case template_expression source_allow target_policy empty_directory)
+foreach(case template_expression source_allow target_policy empty_directory file_directory_collision)
   add_cli_test("regression_${case}" release_regressions
     "-DCASE=${case}" "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/regression-${case}")
 endforeach()
+
+add_cli_test(skips_generated_directories generated_directories
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/generated-directories-work")
+add_cli_test(cache_disabled_by_default cache_defaults
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cache-defaults-work")
 
 add_cli_test(canonical_symlink_boundary symlink_boundary
   "-DSOURCE_FIXTURE=${FIXTURES}/symlink-boundary"

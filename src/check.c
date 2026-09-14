@@ -57,7 +57,10 @@ static bool has_source_extension(const char *path) {
 
 static bool ignored_directory(const char *name) {
   return strcmp(name, ".git") == 0 || strcmp(name, "build") == 0 ||
-         strcmp(name, "node_modules") == 0 || strcmp(name, ".src-lint") == 0;
+         strcmp(name, "node_modules") == 0 || strcmp(name, ".src-lint") == 0 ||
+         strcmp(name, "dist") == 0 || strcmp(name, ".next") == 0 || strcmp(name, "coverage") == 0 ||
+         strcmp(name, "out") == 0 || strcmp(name, ".turbo") == 0 || starts_with(name, "build-") ||
+         starts_with(name, "cmake-build-");
 }
 
 static long file_size(FILE *file) {
@@ -305,10 +308,9 @@ static bool resolve_javascript_path(char *path, SlPathKind kind) {
   static const char *const indexes[] = {"/index.ts", "/index.tsx", "/index.mts", "/index.cts",
                                         "/index.js", "/index.jsx", "/index.mjs", "/index.cjs"};
   if (kind == SL_PATH_MISSING && resolve_typescript_runtime_path(path)) return true;
-  if (kind != SL_PATH_DIRECTORY) {
-    return resolve_suffixes(path, extensions, sizeof(extensions) / sizeof(*extensions));
-  }
-  return resolve_suffixes(path, indexes, sizeof(indexes) / sizeof(*indexes));
+  if (resolve_suffixes(path, extensions, sizeof(extensions) / sizeof(*extensions))) return true;
+  return kind == SL_PATH_DIRECTORY &&
+         resolve_suffixes(path, indexes, sizeof(indexes) / sizeof(*indexes));
 }
 
 static bool resolve_python_path(char *path, SlPathKind kind) {

@@ -153,6 +153,8 @@ The result contains a `findings` array. Each boundary violation includes `rule`,
 | `--strict` | Treat unresolved local imports (`SL2001`) as errors | Off, unless enabled in config |
 | `--format text\|json` | Human-readable diagnostics or JSON | `text` |
 
+Directory scans skip descendant directories named `.git`, `build`, `node_modules`, `.src-lint`, `dist`, `.next`, `coverage`, `out`, or `.turbo`, and names starting with `build-` or `cmake-build-`. This built-in list also applies to `discover` and `graph`; it does not read `.gitignore`. An explicitly supplied file or directory is still scanned.
+
 ### `src-lint discover`
 
 List boundaries and the number of source files in each:
@@ -236,7 +238,7 @@ Run `src-lint check .`. Here, `orders` may import from `shared/**`, and `billing
 | --- | --- | --- |
 | `version` | Config format version | `1`; no other version is accepted |
 | `strict` | Treat unresolved local imports as errors | `false` |
-| `cache.max_mib` | Cache limit in MiB; `0` disables caching | `8` |
+| `cache.max_mib` | Cache limit in MiB; `0` disables caching | `0` |
 | `boundaries.<name>.root` | Boundary directory, relative to the repository | Required for each boundary |
 | `boundaries.<name>.public` | Paths others may import, relative to this boundary's root | No public paths when configured |
 | `boundaries.<name>.allow` | Extra paths this boundary may import, relative to the repository | No exceptions |
@@ -283,7 +285,9 @@ Boundaries merge by name. Config files along the imported path apply public-entr
 
 ### Cache
 
-Parsed imports are cached in `.src-lint/cache/`, up to 8 MiB by default. Set `cache.max_mib = 0` to disable caching. The cache is safe to delete and covered by [`.gitignore`](.gitignore).
+Parsed imports can be cached in `.src-lint/cache/`, up to the configured MiB limit. Caching is disabled by default; set `cache.max_mib` to a positive value to enable it. The cache is safe to delete and covered by [`.gitignore`](.gitignore).
+
+When enabled, the cache keeps separate records for source-content and configuration versions. Successful scans evict the least recently used records when their total size exceeds `cache.max_mib`. Older versions can remain below that limit. Setting the limit to `0` stops cache reads and writes; it does not delete existing records. Delete `.src-lint/cache/` to clear them.
 
 ## Development
 
