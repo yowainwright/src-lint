@@ -72,10 +72,11 @@ static long file_size(FILE *file) {
 }
 
 static char *read_bytes(FILE *file, size_t size) {
+  if (size == SIZE_MAX) return NULL;
   char *content = malloc(size + 1);
   if (!content) return NULL;
   const size_t read_count = fread(content, 1, size, file);
-  if (read_count != size) {
+  if (read_count != size || memchr(content, '\0', size)) {
     free(content);
     return NULL;
   }
@@ -397,11 +398,17 @@ static bool resolve_configured_import(const SlConfig *config, const char *specif
   return normalize_path(joined, target);
 }
 
-static bool resolve_import_target(const SlContext *context, const SlConfig *config,
-                                  const char *source, const SlImport *import, char *target) {
-  if (import->specifier[0] == '.') return resolve_import(source, import->specifier, target);
-  if (resolve_configured_import(config, import->specifier, target)) return true;
-  return resolve_services_import(context, source, import, target);
+/* 1: local target, 0: external import, -1: analysis failure. */
+static int resolve_import_target(const SlContext *context, const SlConfig *config,
+                                 const char *source, const SlImport *import, char *target) {
+  if (import->specifier[0] == '.')
+    return resolve_import(source, import->specifier, target) ? 1 : -1;
+  const bool configured = config->present && specifier_boundary_root(config, import->specifier);
+  if (configured) return resolve_configured_import(config, import->specifier, target) ? 1 : -1;
+  const bool inferred =
+      services_specifier(import->specifier) && inferred_services_segment(context, source);
+  if (!inferred) return 0;
+  return resolve_services_import(context, source, import, target) ? 1 : -1;
 }
 
 static bool at_or_below(const char *path, const char *entry) {
@@ -783,7 +790,9 @@ static int evaluate_canonical_import(SlContext *context, const SlConfig *config,
 static int evaluate_import(SlContext *context, const SlConfig *config, const char *source,
                            const SlImport *import) {
   char target[SL_PATH_CAPACITY];
-  if (!resolve_import_target(context, config, source, import, target)) return 0;
+  const int resolved = resolve_import_target(context, config, source, import, target);
+  if (resolved < 0) report_path_error(context->errors, "resolve import in ", source);
+  if (resolved <= 0) return resolved;
   const bool found = resolve_repository_path(target, import->language);
   SlEdgePolicy lexical = {0};
   SlEdgePolicy canonical = {0};

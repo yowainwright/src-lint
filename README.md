@@ -210,6 +210,8 @@ Configured rules take precedence over defaults. Use one config file per director
 | `.src-lintrc.toml` | TOML |
 | `.src-lintrc.yaml` or `.src-lintrc.yml` | YAML |
 
+Duplicate keys or sections within one document are errors; child configuration files can still override parent values. YAML fields must remain under their containing mapping. Unusable rc files, NUL bytes in configuration or source files, and import paths that exceed resolver capacity exit with `2`.
+
 ### Define public paths
 
 Save this as `.src-lintrc` at your repository root:
@@ -288,6 +290,8 @@ Boundaries merge by name. Config files along the imported path apply public-entr
 Parsed imports can be cached in `.src-lint/cache/`, up to the configured MiB limit. Caching is disabled by default; set `cache.max_mib` to a positive value to enable it. The cache is safe to delete and covered by [`.gitignore`](.gitignore).
 
 When enabled, the cache keeps separate records for source-content and configuration versions. Successful scans evict the least recently used records when their total size exceeds `cache.max_mib`. Older versions can remain below that limit. Setting the limit to `0` stops cache reads and writes; it does not delete existing records. Delete `.src-lint/cache/` to clear them.
+
+Invalid, outdated, or corrupted records fall back to source parsing. Cache files must be regular files; pipes and symlinks are not read. Record checksums detect corruption, but do not authenticate deliberately rewritten cache contents. Keep caching disabled when restored cache contents are untrusted.
 
 ## Development
 

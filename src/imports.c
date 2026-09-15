@@ -640,6 +640,13 @@ static bool add_python_import(char *line, char *statement, size_t line_number, S
 
 static bool parse_python_statement(char *line, char *statement, size_t line_number,
                                    SlImportList *list) {
+  for (char *colon = strchr(statement, ':'); colon; colon = strchr(colon + 1, ':')) {
+    char *suite = skip_horizontal_space(colon + 1);
+    const bool imports = python_keyword(suite, "import") || python_keyword(suite, "from");
+    if (!imports) continue;
+    statement = suite;
+    break;
+  }
   if (!add_python_from(line, statement, line_number, list)) return false;
   return add_python_import(line, statement, line_number, list);
 }
@@ -826,6 +833,60 @@ static char *find_import_quote(char *cursor) {
   return NULL;
 }
 
+static bool decode_go_octal(const char **cursor, const char *end, char **output) {
+  if (end - *cursor < 3) return false;
+  unsigned value = 0;
+  for (size_t index = 0; index < 3; index += 1) {
+    const char digit = *(*cursor)++;
+    if (digit < '0' || digit > '7') return false;
+    value = value * 8 + (unsigned)(digit - '0');
+  }
+  if (value == 0 || value > 255) return false;
+  *(*output)++ = (char)value;
+  return true;
+}
+
+static bool decode_go_hex_byte(const char **cursor, const char *end, char **output) {
+  uint32_t value;
+  if (!read_hexadecimal(cursor, end, 2, &value) || value == 0) return false;
+  *(*output)++ = (char)value;
+  return true;
+}
+
+/* Go string literal escapes: https://go.dev/ref/spec#String_literals */
+static bool decode_go_escape(const char **cursor, const char *end, char **output) {
+  if (*cursor == end) return false;
+  if (**cursor >= '0' && **cursor <= '7') return decode_go_octal(cursor, end, output);
+  const char escape = *(*cursor)++;
+  uint32_t value;
+  if (escape == 'u') return read_hexadecimal(cursor, end, 4, &value) && append_utf8(output, value);
+  if (escape == 'U') return read_hexadecimal(cursor, end, 8, &value) && append_utf8(output, value);
+  if (escape == 'x') return decode_go_hex_byte(cursor, end, output);
+  if (!strchr("abfnrtv\\\"", escape)) return false;
+  *(*output)++ = escape == 'a' ? '\a' : simple_escape(escape);
+  return true;
+}
+
+static char *decode_go_literal(char *quote, const char *end) {
+  char *decoded = malloc((size_t)(end - quote));
+  if (!decoded) return NULL;
+  const char *cursor = quote + 1;
+  char *output = decoded;
+  while (cursor < end) {
+    const char character = *cursor++;
+    if (*quote == '`' && character == '\r') continue;
+    if (*quote == '`' || character != '\\') {
+      *output++ = character;
+      continue;
+    }
+    if (decode_go_escape(&cursor, end, &output)) continue;
+    free(decoded);
+    return NULL;
+  }
+  *output = '\0';
+  return decoded;
+}
+
 static bool add_quoted_specifier(char *line, char *cursor, size_t line_number, SlLanguage language,
                                  SlImportList *list) {
   char *quote = find_import_quote(cursor);
@@ -834,14 +895,18 @@ static bool add_quoted_specifier(char *line, char *cursor, size_t line_number, S
   if (!end) return true;
   const char saved = *end;
   *end = '\0';
+  char *decoded =
+      language == SL_LANGUAGE_GO ? decode_go_literal(quote, end) : duplicate_string(quote + 1);
   const size_t column = (size_t)(quote - line) + 2;
-  const bool added = sl_import_list_add(list, quote + 1, line_number, column, language);
+  const bool added = decoded && sl_import_list_add(list, decoded, line_number, column, language);
+  free(decoded);
   *end = saved;
   return added;
 }
 
-static bool parse_go_line(char *line, size_t line_number, bool *block, SlImportList *list) {
-  char *cursor = skip_horizontal_space(line);
+static bool parse_go_statement(char *line, char *statement, size_t line_number, bool *block,
+                               SlImportList *list) {
+  char *cursor = skip_horizontal_space(statement);
   if (*block && *cursor == ')') {
     *block = false;
     return true;
@@ -852,6 +917,29 @@ static bool parse_go_line(char *line, size_t line_number, bool *block, SlImportL
   if (*cursor != '(') return add_quoted_specifier(line, cursor, line_number, SL_LANGUAGE_GO, list);
   *block = true;
   return add_quoted_specifier(line, cursor + 1, line_number, SL_LANGUAGE_GO, list);
+}
+
+static char *c_statement_end(char *cursor, bool go) {
+  while (*cursor) {
+    if (*cursor == ';' || (go && *cursor == ')')) return cursor;
+    cursor = quote_character(*cursor) ? skip_quoted(cursor) : cursor + 1;
+  }
+  return cursor;
+}
+
+static bool parse_go_line(char *line, size_t line_number, bool *block, SlImportList *list) {
+  char *statement = line;
+  while (*statement) {
+    char *end = c_statement_end(statement, true);
+    const char separator = *end;
+    *end = '\0';
+    const bool parsed = parse_go_statement(line, statement, line_number, block, list);
+    *end = separator;
+    if (separator == ')') *block = false;
+    if (!parsed || !separator) return parsed;
+    statement = end + 1;
+  }
+  return true;
 }
 
 static bool parse_go(char *content, SlImportList *list) {
@@ -881,12 +969,27 @@ static char *skip_proto_modifier(char *cursor) {
   return skip_horizontal_space(cursor);
 }
 
-static bool parse_proto_line(char *line, size_t line_number, SlImportList *list) {
-  char *cursor = skip_horizontal_space(line);
+static bool parse_proto_statement(char *line, char *statement, size_t line_number,
+                                  SlImportList *list) {
+  char *cursor = skip_horizontal_space(statement);
   if (!python_keyword(cursor, "import")) return true;
   cursor = skip_horizontal_space(cursor + strlen("import"));
   cursor = skip_proto_modifier(cursor);
   return add_quoted_specifier(line, cursor, line_number, SL_LANGUAGE_PROTO, list);
+}
+
+static bool parse_proto_line(char *line, size_t line_number, SlImportList *list) {
+  char *statement = line;
+  while (*statement) {
+    char *end = c_statement_end(statement, false);
+    const char separator = *end;
+    *end = '\0';
+    const bool parsed = parse_proto_statement(line, statement, line_number, list);
+    *end = separator;
+    if (!parsed || !separator) return parsed;
+    statement = end + 1;
+  }
+  return true;
 }
 
 static bool parse_proto(char *content, SlImportList *list) {
