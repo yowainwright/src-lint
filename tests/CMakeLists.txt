@@ -5,6 +5,20 @@ set(NESTED_ROOT "${FIXTURES}/path-with-services/services/repo")
 
 add_subdirectory(unit)
 
+add_executable(resilience_test integration/resilience_test.c)
+target_link_libraries(resilience_test PRIVATE src_lint_core)
+target_include_directories(resilience_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+target_compile_definitions(resilience_test PRIVATE _POSIX_C_SOURCE=200809L)
+if(APPLE)
+  target_compile_definitions(resilience_test PRIVATE _DARWIN_C_SOURCE)
+endif()
+target_compile_options(resilience_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+if(SRC_LINT_SANITIZERS)
+  target_compile_options(resilience_test PRIVATE ${SANITIZER_FLAGS})
+endif()
+add_test(NAME resilience COMMAND resilience_test)
+set_tests_properties(resilience PROPERTIES LABELS e2e TIMEOUT 15)
+
 function(add_cli_test name script)
   add_test(NAME "${name}" COMMAND "${CMAKE_COMMAND}"
     "-DCLI=$<TARGET_FILE:src-lint>"

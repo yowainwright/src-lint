@@ -153,6 +153,14 @@ static void check_invalid(const char *path, const char *source, const char *diag
 
 static void invalid_toml_reports_errors(void) {
   const char *toml[] = {"version = 2",
+                        "strict = true\nstrict = false",
+                        "version = 1\nversion = 1",
+                        "[cache]\n[cache]",
+                        "[cache]\nmax_mib = 1\nmax_mib = 0",
+                        "[boundaries.billing]\n[boundaries.billing]",
+                        "[boundaries.billing]\nroot = \"a\"\nroot = \"b\"",
+                        "[boundaries.billing]\npublic = []\npublic = []",
+                        "[boundaries.billing]\nallow = []\nallow = []",
                         "strict = yes",
                         "unknown = true",
                         "[cache]\nmax_mib = -1",
@@ -164,6 +172,15 @@ static void invalid_toml_reports_errors(void) {
 
 static void invalid_json_reports_errors(void) {
   const char *json[] = {"{",
+                        "{\"strict\":true,\"strict\":false}",
+                        "{\"version\":1,\"version\":1}",
+                        "{\"cache\":{},\"cache\":{}}",
+                        "{\"boundaries\":{},\"boundaries\":{}}",
+                        "{\"cache\":{\"max_mib\":1,\"max_mib\":0}}",
+                        "{\"boundaries\":{\"a\":{},\"a\":{}}}",
+                        "{\"boundaries\":{\"a\":{\"root\":\"a\",\"root\":\"b\"}}}",
+                        "{\"boundaries\":{\"a\":{\"public\":[],\"public\":[]}}}",
+                        "{\"boundaries\":{\"a\":{\"allow\":[],\"allow\":[]}}}",
                         "{\"strict\":\"false\"}",
                         "{\"version\":2}",
                         "{} trailing",
@@ -177,7 +194,22 @@ static void invalid_json_reports_errors(void) {
 }
 
 static void invalid_yaml_reports_errors(void) {
-  const char *yaml[] = {"strict: yes", "cache:\n  max_mib: -1", "version: 2",
+  const char *yaml[] = {"strict: yes",
+                        "cache:\n  max_mib: -1",
+                        "version: 2",
+                        "strict: true\nstrict: false",
+                        "cache:\ncache:",
+                        "cache:\n  max_mib: 1\n  max_mib: 0",
+                        "boundaries:\nboundaries:",
+                        "boundaries:\n  billing:\n  billing:",
+                        "boundaries:\n  billing:\n    root: a\n    root: b",
+                        "boundaries:\n  billing:\n    public: []\n    public: []",
+                        "boundaries:\n  billing:\n    allow: []\n    allow: []",
+                        "boundaries:\n  billing:\n    root: services/billing\nstrict: true\n"
+                        "    public: [internal/**]",
+                        "strict: true\n  billing:\n    root: services/billing",
+                        "boundaries:\n  billing:\n    public:\n      - api/**\n"
+                        "    root: services/billing\n      - internal/**",
                         "boundaries:\n  billing:\n    root: \"\\q\""};
   for (size_t index = 0; index < COUNT(yaml); index += 1)
     check_invalid(".src-lintrc.yaml", yaml[index], "invalid YAML configuration");

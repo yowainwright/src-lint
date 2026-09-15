@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,8 +125,8 @@ static void hash_string(uint64_t *hash, const char *value) {
 static uint64_t cache_key(const SlCache *cache, const char *path, const char *content) {
   uint64_t hash = UINT64_C(1469598103934665603);
   const char *tool_version = "src-lint-" SRC_LINT_VERSION;
-  const char *parser_version = "lexical-adapters-v4";
-  const char *cache_version = "cache-v1";
+  const char *parser_version = "lexical-adapters-v5";
+  const char *cache_version = "cache-v2";
   hash_string(&hash, tool_version);
   hash_string(&hash, parser_version);
   hash_string(&hash, cache_version);
@@ -239,26 +240,49 @@ bool sl_cache_init(SlCache *cache, const SlConfig *config, const char *source_pa
   return true;
 }
 
+static bool read_number(FILE *file, uintmax_t *value, int base, char separator) {
+  char text[32];
+  size_t length = 0;
+  int character;
+  while ((character = fgetc(file)) != separator) {
+    const bool digit = character >= '0' && character <= '9';
+    const bool hex = base == 16 && character >= 'a' && character <= 'f';
+    if ((!digit && !hex) || length == sizeof(text) - 1) return false;
+    text[length++] = (char)character;
+  }
+  if (length == 0) return false;
+  text[length] = '\0';
+  errno = 0;
+  char *end;
+  *value = strtoumax(text, &end, base);
+  return errno == 0 && *end == '\0';
+}
+
 static bool read_record_header(FILE *file, size_t *count) {
   char magic[8];
   if (!fgets(magic, sizeof(magic), file)) return false;
-  if (strcmp(magic, "TLC1\n") != 0) return false;
-  return fscanf(file, "%zu", count) == 1 && *count <= 1000000 && fgetc(file) == '\n';
+  if (strcmp(magic, "TLC2\n") != 0) return false;
+  uintmax_t number;
+  if (!read_number(file, &number, 10, '\n') || number > 1000000) return false;
+  *count = (size_t)number;
+  return true;
 }
 
 static bool read_import_record(FILE *file, SlCacheImportRecord *record) {
-  const int read = fscanf(file, "%u %zu %zu %zu", &record->language, &record->line, &record->column,
-                          &record->length);
-  const bool valid =
-      read == 4 && record->language <= SL_LANGUAGE_PROTO && record->length < SL_PATH_CAPACITY;
-  return valid && fgetc(file) == '\n';
+  uintmax_t language, line, column, length;
+  const bool read = read_number(file, &language, 10, ' ') && read_number(file, &line, 10, ' ') &&
+                    read_number(file, &column, 10, ' ') && read_number(file, &length, 10, '\n');
+  if (!read || language > SL_LANGUAGE_PROTO || length >= SL_PATH_CAPACITY) return false;
+  if (line == 0 || line > SIZE_MAX || column == 0 || column > SIZE_MAX) return false;
+  *record = (SlCacheImportRecord){(unsigned)language, (size_t)line, (size_t)column, (size_t)length};
+  return true;
 }
 
 static char *read_cached_specifier(FILE *file, size_t length) {
   char *specifier = malloc(length + 1);
   if (!specifier) return NULL;
   const bool read = fread(specifier, 1, length, file) == length;
-  if (!read) {
+  if (!read || memchr(specifier, '\0', length)) {
     free(specifier);
     return NULL;
   }
@@ -278,19 +302,41 @@ static bool read_record_import(FILE *file, SlImportList *imports) {
   return added;
 }
 
-static bool read_record(FILE *file, SlImportList *imports) {
+static uint64_t record_hash(uint64_t key, const SlImportList *imports) {
+  uint64_t hash = key;
+  hash_bytes(&hash, &imports->count, sizeof(imports->count));
+  for (size_t index = 0; index < imports->count; index += 1) {
+    const SlImport *import = &imports->items[index];
+    hash_bytes(&hash, &import->language, sizeof(import->language));
+    hash_bytes(&hash, &import->line, sizeof(import->line));
+    hash_bytes(&hash, &import->column, sizeof(import->column));
+    hash_string(&hash, import->specifier);
+  }
+  return hash;
+}
+
+static bool read_record(FILE *file, uint64_t key, SlImportList *imports) {
   size_t count;
   if (!read_record_header(file, &count)) return false;
   for (size_t index = 0; index < count; index += 1) {
     if (!read_record_import(file, imports)) return false;
   }
-  return true;
+  uintmax_t checksum;
+  if (!read_number(file, &checksum, 16, '\n')) return false;
+  const bool complete = fgetc(file) == EOF && !ferror(file);
+  return complete && checksum == record_hash(key, imports);
 }
 
-static FILE *open_cache_file(const char *path) {
-  const int descriptor = open(path, O_RDONLY | O_NOFOLLOW);
+static bool regular_descriptor(int descriptor, size_t limit) {
+  struct stat info;
+  return fstat(descriptor, &info) == 0 && S_ISREG(info.st_mode) && info.st_size >= 0 &&
+         (uintmax_t)info.st_size <= limit;
+}
+
+static FILE *open_cache_file(const char *path, size_t limit) {
+  const int descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
   if (descriptor < 0) return NULL;
-  FILE *file = fdopen(descriptor, "rb");
+  FILE *file = regular_descriptor(descriptor, limit) ? fdopen(descriptor, "rb") : NULL;
   if (file) return file;
   close(descriptor);
   return NULL;
@@ -302,9 +348,9 @@ bool sl_cache_load(SlCache *cache, const char *source_path, const char *content,
   char path[SL_PATH_CAPACITY];
   const uint64_t key = cache_key(cache, source_path, content);
   if (!record_path(cache, key, path)) return false;
-  FILE *file = open_cache_file(path);
+  FILE *file = open_cache_file(path, cache->max_bytes);
   if (!file) return false;
-  const bool loaded = read_record(file, imports);
+  const bool loaded = read_record(file, key, imports);
   if (loaded) (void)futimens(fileno(file), NULL);
   fclose(file);
   if (!loaded) {
@@ -314,8 +360,8 @@ bool sl_cache_load(SlCache *cache, const char *source_path, const char *content,
   return loaded;
 }
 
-static bool write_record(FILE *file, const SlImportList *imports) {
-  if (fputs("TLC1\n", file) == EOF || fprintf(file, "%zu\n", imports->count) < 0) return false;
+static bool write_record(FILE *file, uint64_t key, const SlImportList *imports) {
+  if (fputs("TLC2\n", file) == EOF || fprintf(file, "%zu\n", imports->count) < 0) return false;
   for (size_t index = 0; index < imports->count; index += 1) {
     const SlImport *import = &imports->items[index];
     const size_t length = strlen(import->specifier);
@@ -324,7 +370,7 @@ static bool write_record(FILE *file, const SlImportList *imports) {
     if (header < 0 || fwrite(import->specifier, 1, length, file) != length) return false;
     if (fputc('\n', file) == EOF) return false;
   }
-  return true;
+  return fprintf(file, "%016llx\n", (unsigned long long)record_hash(key, imports)) > 0;
 }
 
 static FILE *create_temporary_file(const char *path, char *temporary) {
@@ -339,11 +385,11 @@ static FILE *create_temporary_file(const char *path, char *temporary) {
   return NULL;
 }
 
-static bool store_record(const char *path, const SlImportList *imports) {
+static bool store_record(const char *path, uint64_t key, const SlImportList *imports) {
   char temporary[SL_PATH_CAPACITY];
   FILE *file = create_temporary_file(path, temporary);
   if (!file) return false;
-  const bool written = write_record(file, imports);
+  const bool written = write_record(file, key, imports);
   const bool closed = fclose(file) == 0;
   if (written && closed && rename(temporary, path) == 0) return true;
   unlink(temporary);
@@ -355,7 +401,7 @@ size_t sl_cache_store(SlCache *cache, const char *source_path, const char *conte
   if (!cache->enabled) return 0;
   char path[SL_PATH_CAPACITY];
   const uint64_t key = cache_key(cache, source_path, content);
-  if (!record_path(cache, key, path) || !store_record(path, imports)) return 0;
+  if (!record_path(cache, key, path) || !store_record(path, key, imports)) return 0;
   struct stat information;
   if (stat(path, &information) != 0) return 0;
   return (size_t)information.st_size;
@@ -392,10 +438,10 @@ static bool control_path(const SlCache *cache, const char *name, char *path) {
 static bool lock_cache(SlCache *cache) {
   char path[SL_PATH_CAPACITY];
   if (!control_path(cache, ".lock", path)) return false;
-  const int descriptor = open(path, O_RDWR | O_CREAT | O_NOFOLLOW, 0666);
+  const int descriptor = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK, 0666);
   if (descriptor < 0) return false;
   struct flock lock = {.l_type = F_WRLCK, .l_whence = SEEK_SET};
-  if (fcntl(descriptor, F_SETLK, &lock) == 0) {
+  if (regular_descriptor(descriptor, SIZE_MAX) && fcntl(descriptor, F_SETLK, &lock) == 0) {
     cache->lock_fd = descriptor;
     return true;
   }
@@ -419,10 +465,13 @@ static bool control_exists(const SlCache *cache, const char *name) {
 static bool read_tracked_bytes(const SlCache *cache, size_t *bytes) {
   char path[SL_PATH_CAPACITY];
   if (!control_path(cache, ".size", path)) return false;
-  FILE *file = open_cache_file(path);
+  FILE *file = open_cache_file(path, 32);
   if (!file) return false;
-  const bool read = fscanf(file, "%zu", bytes) == 1;
+  uintmax_t number;
+  const bool read = read_number(file, &number, 10, '\n') && number <= SIZE_MAX &&
+                    fgetc(file) == EOF && !ferror(file);
   const bool closed = fclose(file) == 0;
+  if (read && closed) *bytes = (size_t)number;
   return read && closed;
 }
 
@@ -442,9 +491,11 @@ static bool write_tracked_bytes(const SlCache *cache) {
 static bool mark_cache_dirty(const SlCache *cache) {
   char path[SL_PATH_CAPACITY];
   if (!control_path(cache, ".dirty", path)) return false;
-  const int descriptor = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0666);
+  const int descriptor = open(path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK, 0666);
   if (descriptor < 0) return false;
-  return close(descriptor) == 0;
+  const bool marked = regular_descriptor(descriptor, SIZE_MAX) && ftruncate(descriptor, 0) == 0;
+  const bool closed = close(descriptor) == 0;
+  return marked && closed;
 }
 
 static void clear_cache_dirty(const SlCache *cache) {
