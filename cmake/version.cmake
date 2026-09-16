@@ -1,0 +1,13 @@
+if(NOT DEFINED SRC_LINT_VERSION)
+  set(SRC_LINT_VERSION "0.0.0")
+  set(version_file "${CMAKE_CURRENT_LIST_DIR}/../VERSION")
+  if(EXISTS "${version_file}")
+    file(READ "${version_file}" SRC_LINT_VERSION)
+    string(STRIP "${SRC_LINT_VERSION}" SRC_LINT_VERSION)
+  endif()
+endif()
+
+set(version_component "(0|[1-9][0-9]*)")
+if(NOT SRC_LINT_VERSION MATCHES "^${version_component}\\.${version_component}\\.${version_component}$")
+  message(FATAL_ERROR "SRC_LINT_VERSION must be MAJOR.MINOR.PATCH without a v prefix")
+endif()

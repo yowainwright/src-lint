@@ -332,7 +332,7 @@ The [release workflow](.github/workflows/release.yml) publishes source and macOS
 <details>
 <summary>Maintainer setup and retries</summary>
 
-Tags use `vMAJOR.MINOR.PATCH`, must point to a commit on `main`, and must match the version in [CMakeLists.txt](CMakeLists.txt).
+Push a `vMAJOR.MINOR.PATCH` tag on `main` to release. The tag supplies the version; no version-file edit is needed. Local builds use `0.0.0` unless configured with `-DSRC_LINT_VERSION=MAJOR.MINOR.PATCH`. Published source archives retain their release version.
 
 Before Homebrew updates, merge the tap's inventory and CI setup. Set `HOMEBREW_TAP_TOKEN` to a fine-grained token limited to `yowainwright/homebrew-tap`, with Contents and Pull requests write access. Protect `main` and release tags, and require tap CI before merging formula PRs.
 

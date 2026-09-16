@@ -206,6 +206,11 @@ add_cli_test(graph_proto graph_language "-DFIXTURE=${FIXTURES}/proto-import" -DL
 
 add_cli_test(cli_usage cli_usage)
 add_cli_test(cli_version cli_version "-DVERSION=${PROJECT_VERSION}")
+add_cli_test(release_version release_version
+  "-DREPO_ROOT=${PROJECT_SOURCE_DIR}"
+  "-DC_COMPILER=${CMAKE_C_COMPILER}"
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/version-work")
+set_tests_properties(release_version PROPERTIES LABELS "e2e;release" TIMEOUT 120)
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
   add_cli_test(cli_install cli_install
     "-DBUILD_ROOT=${PROJECT_BINARY_DIR}" "-DBUILD_CONFIG=$<CONFIG>"

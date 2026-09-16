@@ -51,7 +51,8 @@ jobs:
         run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - name: Configure and build
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DSRC_LINT_VERSION="${GITHUB_REF_NAME#v}"
           cmake --build build --parallel
       - name: Verify tag version
         run: bash scripts/release.sh verify-version ./build/src-lint "$GITHUB_REF_NAME"
@@ -93,7 +94,8 @@ jobs:
           persist-credentials: false
       - name: Test with sanitizers
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DSRC_LINT_SANITIZERS=ON
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DSRC_LINT_SANITIZERS=ON \
+            -DSRC_LINT_VERSION="${GITHUB_REF_NAME#v}"
           cmake --build build --parallel
           ctest --test-dir build --parallel 4 --output-on-failure
 
@@ -113,7 +115,11 @@ jobs:
       - name: Package source
         run: |
           package="src-lint-${GITHUB_REF_NAME#v}-source"
-          git archive --format=tar.gz --prefix="$package/" -o "release/$package.tar.gz" "$GITHUB_SHA"
+          mkdir -p build
+          printf '%s\n' "${GITHUB_REF_NAME#v}" > build/VERSION
+          git archive --format=tar.gz --prefix="$package/" --add-file=build/VERSION \
+            -o "release/$package.tar.gz" "$GITHUB_SHA"
+          test "$(tar -xOf "release/$package.tar.gz" "$package/VERSION")" = "${GITHUB_REF_NAME#v}"
           cd release
           cmake -E sha256sum "$package.tar.gz" > "$package.tar.gz.sha256"
       - name: Publish release
