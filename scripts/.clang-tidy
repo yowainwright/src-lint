@@ -1,0 +1,13 @@
+Checks: >-
+  -*,
+  clang-analyzer-core.*,clang-analyzer-deadcode.*,clang-analyzer-unix.*,
+  bugprone-assert-side-effect,
+  bugprone-assignment-in-if-condition,
+  bugprone-sizeof-expression,
+  bugprone-suspicious-memset-usage,
+  readability-avoid-nested-conditional-operator,
+  readability-else-after-return,
+  readability-isolate-declaration
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(^|/)(include|src|tests)/'
+InheritParentConfig: false

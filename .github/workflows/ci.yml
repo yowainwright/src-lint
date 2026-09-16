@@ -10,6 +10,32 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    env:
+      CLANG_FORMAT: clang-format-18
+      CLANG_TIDY: clang-tidy-18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install lint tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18 clang-tidy-18 shellcheck
+          mkdir -p build-lint-tools/bin
+          curl --fail --location --retry 3 \
+            https://github.com/yowainwright/shellcheck_legibility/releases/download/v0.2.1/shellcheck-legibility-0.2.1.tar.gz \
+            -o build-lint-tools/shellcheck-legibility.tar.gz
+          echo '137942db1000e72ce8f8e2fbe8c10e334c70dc554ad2ef08aa49f0778f0302c0  build-lint-tools/shellcheck-legibility.tar.gz' | sha256sum --check
+          tar -xzf build-lint-tools/shellcheck-legibility.tar.gz -C build-lint-tools --strip-components=1
+          curl --fail --location --retry 3 \
+            https://github.com/yowainwright/fs-lint/releases/download/v0.2.1/fs-lint-linux-amd64 \
+            -o build-lint-tools/bin/fs-lint
+          echo '8b9c4c222d489765e45be085d3333d02c2d6bd1c847fb068e62bd99363009fd1  build-lint-tools/bin/fs-lint' | sha256sum --check
+          chmod +x build-lint-tools/bin/fs-lint
+          echo "$GITHUB_WORKSPACE/build-lint-tools/bin" >> "$GITHUB_PATH"
+      - name: Lint
+        run: bash scripts/lint.sh
+
   build-and-test:
     strategy:
       matrix:

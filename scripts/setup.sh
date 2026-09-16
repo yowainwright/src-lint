@@ -51,12 +51,12 @@ git_hooks_dir() {
 }
 
 managed_hook() {
-  local path="$1"
+  local path="${1:?}"
   [[ -f "$path" ]] && grep -Fq "src-lint managed Git hook" "$path"
 }
 
 assert_hook_target_available() {
-  local hooks_dir="$1"
+  local hooks_dir="${1:?}"
   local hook
   for hook in "${MANAGED_HOOKS[@]}"; do
     [[ -f "$REPO_ROOT/$HOOK_SOURCE_DIR/$hook" ]] || fail "missing $HOOK_SOURCE_DIR/$hook"
@@ -68,12 +68,12 @@ assert_hook_target_available() {
 }
 
 hook_is_current() {
-  local source="$1" target="$2"
+  local source="${1:?}" target="${2:?}"
   [[ -x "$target" ]] && cmp -s "$source" "$target"
 }
 
 hooks_are_current() {
-  local hooks_dir="$1" hook
+  local hooks_dir="${1:?}" hook
   [[ -z "$(hook_path_settings)" ]] || return 1
   for hook in "${MANAGED_HOOKS[@]}"; do
     hook_is_current "$REPO_ROOT/$HOOK_SOURCE_DIR/$hook" "$hooks_dir/$hook" || return 1
@@ -81,7 +81,7 @@ hooks_are_current() {
 }
 
 install_hooks() {
-  local hooks_dir="$1"
+  local hooks_dir="${1:?}"
   /bin/mkdir -p "$hooks_dir"
   local hook
   for hook in "${MANAGED_HOOKS[@]}"; do
@@ -90,9 +90,8 @@ install_hooks() {
     /bin/cp "$source" "$hooks_dir/$hook"
     /bin/chmod +x "$hooks_dir/$hook"
   done
-  if [[ -n "$(hook_path_settings)" ]]; then
-    git -C "$REPO_ROOT" config --local --unset-all core.hooksPath
-  fi
+  [[ -n "$(hook_path_settings)" ]] || return 0
+  git -C "$REPO_ROOT" config --local --unset-all core.hooksPath
 }
 
 main() {

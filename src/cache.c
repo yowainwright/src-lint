@@ -269,7 +269,10 @@ static bool read_record_header(FILE *file, size_t *count) {
 }
 
 static bool read_import_record(FILE *file, SlCacheImportRecord *record) {
-  uintmax_t language, line, column, length;
+  uintmax_t language;
+  uintmax_t line;
+  uintmax_t column;
+  uintmax_t length;
   const bool read = read_number(file, &language, 10, ' ') && read_number(file, &line, 10, ' ') &&
                     read_number(file, &column, 10, ' ') && read_number(file, &length, 10, '\n');
   if (!read || language > SL_LANGUAGE_PROTO || length >= SL_PATH_CAPACITY) return false;

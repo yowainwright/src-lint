@@ -6,6 +6,10 @@ file(MAKE_DIRECTORY "${source}")
 file(COPY "${REPO_ROOT}/CMakeLists.txt" "${REPO_ROOT}/LICENSE"
   "${REPO_ROOT}/src" "${REPO_ROOT}/include" "${REPO_ROOT}/cmake"
   DESTINATION "${source}")
+file(APPEND "${source}/CMakeLists.txt" [[
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/cli-path-$<CONFIG>.txt"
+  CONTENT "$<TARGET_FILE:src-lint>")
+]])
 
 function(configure_version build)
   execute_process(
@@ -26,8 +30,9 @@ function(check_binary_version build version)
   if(NOT result EQUAL 0)
     message(FATAL_ERROR "Version build failed\n${output}\n${errors}")
   endif()
+  file(READ "${build}/cli-path-Release.txt" cli)
   execute_process(
-    COMMAND bash "${REPO_ROOT}/scripts/release.sh" verify-version "${build}/src-lint" "v${version}"
+    COMMAND bash "${REPO_ROOT}/scripts/release.sh" verify-version "${cli}" "v${version}"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors)
   if(NOT result EQUAL 0)
     message(FATAL_ERROR "Release version gate failed\n${output}\n${errors}")
