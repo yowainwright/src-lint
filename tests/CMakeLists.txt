@@ -139,6 +139,8 @@ add_cli_test(extensionless_config extensionless_config
   "-DSOURCE_FIXTURE=${FIXTURES}/config-child"
   "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/extensionless-config"
   "-DEXPECTED=${EXPECTED_ROOT}/config_child.json")
+add_cli_test(explicit_config explicit_config
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/explicit-config")
 foreach(name .src-lintrc .src-lintrc.json .src-lintrc.toml .src-lintrc.yaml .src-lintrc.yml)
   string(MAKE_C_IDENTIFIER "${name}" config_name)
   add_cli_test("config_without_sources_${config_name}" config_without_sources

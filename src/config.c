@@ -571,6 +571,32 @@ static bool parse_toml_line(char *line, SlConfig *config, SlTomlState *state) {
   return apply_toml_value(config, state, line);
 }
 
+static bool toml_array_assignment(char *line, const SlTomlState *state, bool embedded) {
+  if (embedded && (!state->selected || state->quote || state->depth)) return false;
+  line = trim_left(line);
+  if (*line == '#' || *line == '[') return false;
+  char *equals = strchr(line, '=');
+  return equals && *trim_left(equals + 1) == '[';
+}
+
+static bool join_toml_array(char *line, char **next, size_t *lines) {
+  SlTomlState array = {0};
+  while (true) {
+    const size_t length = strlen(line);
+    strip_config_comment(line);
+    if (!skip_toml_line(line, &array)) return false;
+    if (!array.depth) return !array.quote;
+    if (!*next) return false;
+    const size_t kept = strlen(line);
+    memset(line + kept, ' ', length - kept);
+    **next = ' ';
+    line = *next + 1;
+    *next = strchr(line, '\n');
+    if (*next) **next = '\0';
+    *lines += 1;
+  }
+}
+
 static bool parse_toml(const char *path, char *content, SlConfig *config, FILE *errors,
                        bool embedded) {
   SlTomlState state = {.section = SL_CONFIG_ROOT};
@@ -579,15 +605,18 @@ static bool parse_toml(const char *path, char *content, SlConfig *config, FILE *
   while (*line) {
     char *next = strchr(line, '\n');
     if (next) *next = '\0';
-    const bool parsed =
-        embedded ? embedded_toml_line(line, config, &state) : parse_toml_line(line, config, &state);
+    size_t lines = 1;
+    const bool complete =
+        !toml_array_assignment(line, &state, embedded) || join_toml_array(line, &next, &lines);
+    const bool parsed = complete && (embedded ? embedded_toml_line(line, config, &state)
+                                              : parse_toml_line(line, config, &state));
     if (!parsed) {
       config_error(errors, path, line_number, "invalid TOML configuration");
       return false;
     }
     if (!next) break;
     line = next + 1;
-    line_number += 1;
+    line_number += lines;
   }
   if (!state.quote && !state.depth) return true;
   config_error(errors, path, line_number, "invalid TOML configuration");
@@ -1432,9 +1461,34 @@ static bool collect_directory_config(const char *directory, SlPathList *paths, F
   return count == 0 || path_list_add(paths, config_path);
 }
 
-static bool collect_config_paths(const char *file_path, SlPathList *paths, FILE *errors) {
+static bool at_or_below(const char *path, const char *root) {
+  const size_t length = strlen(root);
+  if (strcmp(root, "/") == 0) return path[0] == '/';
+  return strcmp(path, root) == 0 || (strncmp(path, root, length) == 0 && path[length] == '/');
+}
+
+static bool collect_selected_configs(char *directory, const char *selected, SlPathList *paths,
+                                     FILE *errors) {
+  char root[SL_PATH_CAPACITY];
+  const SlConfigFile *file = sl_config_file_for_path(selected);
+  const int status =
+      file ? active_config_status(selected, file, errors) : config_file_status(selected);
+  if (status != 1 || !file_directory(selected, root)) {
+    fprintf(errors, "src-lint: cannot load selected configuration %s\n", selected);
+    return false;
+  }
+  while (at_or_below(directory, root) && strcmp(directory, root) != 0) {
+    if (!collect_directory_config(directory, paths, errors)) return false;
+    if (!parent_directory(directory)) return false;
+  }
+  return path_list_add(paths, selected);
+}
+
+static bool collect_config_paths(const char *file_path, const char *selected, SlPathList *paths,
+                                 FILE *errors) {
   char directory[SL_PATH_CAPACITY];
   if (!file_directory(file_path, directory)) return false;
+  if (selected) return collect_selected_configs(directory, selected, paths, errors);
   char git_root[SL_PATH_CAPACITY];
   const bool bounded = find_git_root(directory, git_root);
   do {
@@ -1453,8 +1507,22 @@ static bool set_repository_root(SlConfig *config, const char *config_path) {
   return true;
 }
 
-static bool parse_config_layer(const char *path, char *content, SlConfig *config, FILE *errors) {
+static const SlConfigFile *config_format_for_path(const char *path) {
   const SlConfigFile *file = sl_config_file_for_path(path);
+  if (file) return file;
+  const char *extension = strrchr(path, '.');
+  if (!extension) return NULL;
+  for (size_t index = 0; index < sl_config_file_count; index += 1) {
+    if (sl_config_files[index].embedded) continue;
+    const char *suffix = strrchr(sl_config_files[index].name, '.');
+    if (suffix == sl_config_files[index].name) continue;
+    if (strcmp(extension, suffix) == 0) return &sl_config_files[index];
+  }
+  return NULL;
+}
+
+static bool parse_config_layer(const char *path, char *content, SlConfig *config, FILE *errors) {
+  const SlConfigFile *file = config_format_for_path(path);
   if (!file) {
     config_error(errors, path, 1, "unsupported configuration filename");
     return false;
@@ -1597,10 +1665,11 @@ static bool validate_config(const SlConfig *config, const char *file_path, FILE 
   return false;
 }
 
-bool sl_config_load_for_file(const char *file_path, SlConfig *config, FILE *errors) {
+bool sl_config_load_for_file(const char *file_path, const char *config_path, SlConfig *config,
+                             FILE *errors) {
   sl_config_init(config);
   SlPathList paths = {0};
-  const bool collected = collect_config_paths(file_path, &paths, errors);
+  const bool collected = collect_config_paths(file_path, config_path, &paths, errors);
   if (!collected) {
     path_list_free(&paths);
     return false;
@@ -1615,19 +1684,15 @@ bool sl_config_load_for_file(const char *file_path, SlConfig *config, FILE *erro
   return valid;
 }
 
-static bool at_or_below(const char *path, const char *root) {
-  const size_t length = strlen(root);
-  return strcmp(path, root) == 0 || (strncmp(path, root, length) == 0 && path[length] == '/');
-}
-
-static bool collect_target_configs(const char *target, SlPathList *paths, FILE *errors) {
+static bool collect_target_configs(const char *target, const char *selected, SlPathList *paths,
+                                   FILE *errors) {
   struct stat information;
   const bool directory = stat(target, &information) == 0 && S_ISDIR(information.st_mode);
-  if (!directory) return collect_config_paths(target, paths, errors);
+  if (!directory) return collect_config_paths(target, selected, paths, errors);
   char file_path[SL_PATH_CAPACITY];
   const int written = snprintf(file_path, sizeof(file_path), "%s/.", target);
   if (written < 0 || (size_t)written >= sizeof(file_path)) return false;
-  return collect_config_paths(file_path, paths, errors);
+  return collect_config_paths(file_path, selected, paths, errors);
 }
 
 static bool apply_target_configs(const SlPathList *paths, const char *source, SlConfig *config,
@@ -1643,12 +1708,12 @@ static bool apply_target_configs(const SlPathList *paths, const char *source, Sl
   return true;
 }
 
-bool sl_config_load_for_import(const char *source, const char *target, SlConfig *config,
-                               FILE *errors) {
-  if (!sl_config_load_for_file(source, config, errors)) return false;
+bool sl_config_load_for_import(const char *source, const char *target, const char *config_path,
+                               SlConfig *config, FILE *errors) {
+  if (!sl_config_load_for_file(source, config_path, config, errors)) return false;
   if (!config->present || !at_or_below(target + 1, config->repository_root)) return true;
   SlPathList paths = {0};
-  const bool collected = collect_target_configs(target, &paths, errors);
+  const bool collected = collect_target_configs(target, config_path, &paths, errors);
   const bool applied = collected && apply_target_configs(&paths, source, config, errors);
   const bool valid = applied && validate_config(config, target, errors);
   path_list_free(&paths);

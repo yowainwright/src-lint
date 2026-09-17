@@ -6,9 +6,9 @@
 
 static void print_usage(FILE *stream) {
   fputs("Usage:\n", stream);
-  fputs("  src-lint check [path] [--strict] [--format text|json]\n", stream);
-  fputs("  src-lint discover [path] [--format text|json]\n", stream);
-  fputs("  src-lint graph [path] [--format json|html]\n", stream);
+  fputs("  src-lint check [path] [--config file] [--strict] [--format text|json]\n", stream);
+  fputs("  src-lint discover [path] [--config file] [--format text|json]\n", stream);
+  fputs("  src-lint graph [path] [--config file] [--format json|html]\n", stream);
   fputs("  src-lint --version\n", stream);
 }
 
@@ -52,20 +52,31 @@ static bool format_supported(const SlRunOptions *options) {
   return options->format != SL_FORMAT_HTML;
 }
 
+static bool set_option(const char *name, const char *value, SlRunOptions *options) {
+  if (strcmp(name, "--format") == 0) return set_format(value, options);
+  if (strcmp(name, "--config") != 0 || options->config_path || !*value || *value == '-')
+    return false;
+  options->config_path = value;
+  return true;
+}
+
+static bool parse_option(int argc, char **argv, int *index, SlRunOptions *options) {
+  const char *name = argv[*index];
+  if (strcmp(name, "--strict") == 0) {
+    options->strict = true;
+    return options->command == SL_COMMAND_CHECK;
+  }
+  *index += 1;
+  return *index < argc && set_option(name, argv[*index], options);
+}
+
 static bool parse_arguments(int argc, char **argv, SlRunOptions *options) {
   bool has_root = false;
   for (int index = 2; index < argc; index += 1) {
-    if (strcmp(argv[index], "--strict") == 0) {
-      if (options->command != SL_COMMAND_CHECK) return false;
-      options->strict = true;
-      continue;
-    }
-    if (strcmp(argv[index], "--format") == 0) {
-      index += 1;
-      if (index >= argc || !set_format(argv[index], options)) return false;
-      continue;
-    }
-    if (argv[index][0] == '-' || has_root) return false;
+    const bool is_option = argv[index][0] == '-';
+    if (is_option && !parse_option(argc, argv, &index, options)) return false;
+    if (is_option) continue;
+    if (has_root) return false;
     options->root = argv[index];
     has_root = true;
   }
@@ -81,7 +92,7 @@ int main(int argc, char **argv) {
     print_usage(stdout);
     return 0;
   }
-  SlRunOptions options = {".", SL_COMMAND_CHECK, SL_FORMAT_TEXT, false};
+  SlRunOptions options = {.root = ".", .command = SL_COMMAND_CHECK, .format = SL_FORMAT_TEXT};
   if (argc < 2 || !set_command(argv[1], &options)) {
     print_usage(stderr);
     return 2;

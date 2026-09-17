@@ -24,7 +24,7 @@ static void expect_scan(SlCommand command, int expected, const char *rule) {
   FILE *out = open_memstream(&output, &output_size);
   FILE *err = open_memstream(&errors, &error_size);
   CHECK(out != NULL && err != NULL);
-  const SlRunOptions options = {".", command, SL_FORMAT_JSON, command == SL_COMMAND_CHECK};
+  const SlRunOptions options = {".", command, SL_FORMAT_JSON, command == SL_COMMAND_CHECK, NULL};
   const int result = sl_run(&options, out, err);
   CHECK(fclose(out) == 0 && fclose(err) == 0);
   fprintf(stderr, "scan result %d: %s\n", result, errors);

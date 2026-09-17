@@ -204,6 +204,8 @@ Use `src-lint --help` (or `-h`) for command syntax and `src-lint --version` for 
 
 Configured rules take precedence over defaults. Use one active config per directory; multiple active configs exit with configuration error `2`. Shared files without a src-lint section are ignored.
 
+All commands accept `--config <file>`, for example `src-lint check . --config .src-lintrc`. This selects the base policy instead of automatic ancestor discovery; child configs still override it. Boundary roots are relative to the selected file's directory. Custom filenames must end in `.json`, `.toml`, `.yaml`, or `.yml`; shared filenames below retain their enclosing keys. Missing or invalid selected configs exit with `2`.
+
 | Filename | Configuration |
 | --- | --- |
 | `.src-lintrc` or `.src-lintrc.json` | JSON |

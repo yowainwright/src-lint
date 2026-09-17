@@ -18,13 +18,14 @@ static bool rejects(const SlRunOptions *options) {
 }
 
 static bool rejects_invalid_options(const char *root) {
-  const SlRunOptions command = {root, (SlCommand)99, SL_FORMAT_TEXT, false};
-  const SlRunOptions format = {root, SL_COMMAND_CHECK, (SlFormat)99, false};
-  const SlRunOptions graph_text = {root, SL_COMMAND_GRAPH, SL_FORMAT_TEXT, false};
-  const SlRunOptions discover_html = {root, SL_COMMAND_DISCOVER, SL_FORMAT_HTML, false};
-  const SlRunOptions discover_strict = {root, SL_COMMAND_DISCOVER, SL_FORMAT_TEXT, true};
+  const SlRunOptions command = {root, (SlCommand)99, SL_FORMAT_TEXT, false, NULL};
+  const SlRunOptions format = {root, SL_COMMAND_CHECK, (SlFormat)99, false, NULL};
+  const SlRunOptions graph_text = {root, SL_COMMAND_GRAPH, SL_FORMAT_TEXT, false, NULL};
+  const SlRunOptions discover_html = {root, SL_COMMAND_DISCOVER, SL_FORMAT_HTML, false, NULL};
+  const SlRunOptions discover_strict = {root, SL_COMMAND_DISCOVER, SL_FORMAT_TEXT, true, NULL};
+  const SlRunOptions empty_config = {root, SL_COMMAND_CHECK, SL_FORMAT_TEXT, false, ""};
   return rejects(&command) && rejects(&format) && rejects(&graph_text) && rejects(&discover_html) &&
-         rejects(&discover_strict);
+         rejects(&discover_strict) && rejects(&empty_config);
 }
 
 static bool rejects_output_failure(const char *root) {
@@ -33,7 +34,7 @@ static bool rejects_output_failure(const char *root) {
   if (!output || !errors) return close_streams(output, errors, 1);
   const int descriptor = fileno(output);
   if (descriptor < 0 || close(descriptor) != 0) return close_streams(output, errors, 1);
-  const SlRunOptions options = {root, SL_COMMAND_CHECK, SL_FORMAT_JSON, false};
+  const SlRunOptions options = {root, SL_COMMAND_CHECK, SL_FORMAT_JSON, false, NULL};
   const int result = sl_run(&options, output, errors);
   return close_streams(output, errors, result);
 }

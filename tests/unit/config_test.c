@@ -22,10 +22,10 @@ static const ConfigCase formats[] = {
     {".src-lintrc.toml",
      "version = 1\nstrict = true\n[cache]\nmax_mib = 2\n"
      "[boundaries.billing]\nroot = \"services/billing\"\n"
-     "public = [\"api/**\", \"proto/**\"]\nallow = [\"shared/**\"]\n",
+     "public = [\n  \"api/**\", # public entry\n\n  \"proto/**\",\n]\nallow = [\"shared/**\"]\n",
      "strict = false\n[cache]\nmax_mib = 0\n[boundaries.billing]\npublic = [\"public/**\"]\n"
      "[boundaries.orders]\nroot = \"services/orders\"\n",
-     "[boundaries.billing]\nroot = \"domains/billing\"\npublic = []\nallow = []\n"},
+     "[boundaries.billing]\nroot = \"domains/billing\"\npublic = [\n# empty\n]\nallow = []\n"},
     {".src-lintrc.json", json_parent, json_child, json_clear},
     {".src-lintrc.yaml",
      "version: 1\nstrict: true\ncache:\n  max_mib: 2\nboundaries:\n  billing:\n"
@@ -51,13 +51,14 @@ static const ConfigCase formats[] = {
      "[project]\nname = 'example'\ndescription = '''\n[tool.src-lint]\nstrict = invalid\n'''\n"
      "dependencies = [\n'other',\n]\n[tool.src-lint]\nversion = 1\nstrict = true\n"
      "[tool.src-lint.cache]\nmax_mib = 2\n[tool.src-lint.boundaries.billing]\n"
-     "root = \"services/billing\"\npublic = [\"api/**\", \"proto/**\"]\n"
-     "allow = [\"shared/**\"]\n[tool.other]\nstrict = 'unrelated'\n",
+     "root = \"services/billing\"\npublic = [ # public entries\n"
+     "  \"api/**\",\n  # ignored ] bracket\n  \"proto/**\",\n]\n"
+     "allow = [\n  \"shared/**\",\n]\n[tool.other] # example = [\nstrict = 'unrelated'\n",
      "[\"tool\".\"src\\u002dlint\"]\nstrict = false\n[tool.src-lint.cache]\nmax_mib = 0\n"
      "[tool.src-lint.boundaries.billing]\npublic = [\"public/**\"]\n"
      "[tool.src-lint.boundaries.orders]\nroot = \"services/orders\"\n",
      "[tool.src-lint.boundaries.billing]\nroot = \"domains/billing\"\n"
-     "public = []\nallow = []\n"},
+     "public = [\r\n  # empty\r\n]\r\nallow = []\n"},
     {"src-lint.yaml",
      "---\n\"meta:data\": Don't read this as policy\nother:\n  src-lint:\n    strict: false\n"
      "src-lint:\n  version: 1\n  strict: true\n  cache:\n    max_mib: 2\n"
@@ -208,6 +209,35 @@ static void invalid_toml_reports_errors(void) {
                         "[boundaries.billing]\npublic = [\"api/**\", 5]"};
   for (size_t index = 0; index < COUNT(toml); index += 1)
     check_invalid(".src-lintrc.toml", toml[index], "invalid TOML configuration");
+}
+
+static void invalid_multiline_toml_arrays_report_errors(void) {
+  const char *values[] = {"[\n\"api/**\",", "[\n\"api/**\"\n\"proto/**\"\n]", "[\n5\n]",
+                          "[\n\"unterminated\n]", "[\n# only a comment"};
+  for (size_t index = 0; index < COUNT(values); index += 1) {
+    char source[256];
+    snprintf(source, sizeof(source), "[boundaries.billing]\npublic = %s", values[index]);
+    check_invalid(".src-lintrc.toml", source, ":2: invalid TOML configuration");
+    snprintf(source, sizeof(source), "[tool.src-lint.boundaries.billing]\npublic = %s",
+             values[index]);
+    check_invalid("pyproject.toml", source, ":2: invalid TOML configuration");
+  }
+  check_invalid("pyproject.toml",
+                "[tool.src-lint.boundaries.billing]\npublic = [\n\"api/**\",\n]\nunknown = true",
+                ":5: invalid TOML configuration");
+}
+
+static void multiline_toml_arrays_preserve_strings(void) {
+  SlConfig config;
+  sl_config_init(&config);
+  apply_layer(&config, "pyproject.toml",
+              "[tool.src-lint.boundaries.billing]\npublic = [\n"
+              "  \"quote\\\"#]entry\", # ignored [\n  \"api/**\",\n]");
+  CHECK(config.boundary_count == 1);
+  CHECK(config.boundaries[0].public_entries.count == 2);
+  CHECK(strcmp(config.boundaries[0].public_entries.items[0], "quote\"#]entry") == 0);
+  CHECK(strcmp(config.boundaries[0].public_entries.items[1], "api/**") == 0);
+  sl_config_free(&config);
 }
 
 static void invalid_json_reports_errors(void) {
@@ -361,6 +391,8 @@ int main(void) {
   formats_produce_equivalent_policy();
   inheritance_across_formats();
   invalid_toml_reports_errors();
+  invalid_multiline_toml_arrays_report_errors();
+  multiline_toml_arrays_preserve_strings();
   invalid_json_reports_errors();
   invalid_yaml_reports_errors();
   invalid_embedded_configs_report_errors();

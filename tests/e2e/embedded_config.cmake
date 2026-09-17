@@ -32,7 +32,10 @@ strict = true
 root = "domains/orders"
 [tool.src-lint.boundaries.billing]
 root = "domains/billing"
-public = ["api/**"]
+public = [
+  # Public entry points.
+  "api/**",
+]
 ]])
   set(invalid "[tool.src-lint]\nstrict = 'invalid'\n")
 else()
