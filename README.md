@@ -202,13 +202,18 @@ Use `src-lint --help` (or `-h`) for command syntax and `src-lint --version` for 
 
 ## Configuration
 
-Configured rules take precedence over defaults. Use one config file per directory. If a check finds two or more supported rc files in the same directory, it exits with configuration error `2`:
+Configured rules take precedence over defaults. Use one active config per directory; multiple active configs exit with configuration error `2`. Shared files without a src-lint section are ignored.
 
-| Filename | Format |
+| Filename | Configuration |
 | --- | --- |
 | `.src-lintrc` or `.src-lintrc.json` | JSON |
 | `.src-lintrc.toml` | TOML |
 | `.src-lintrc.yaml` or `.src-lintrc.yml` | YAML |
+| `package.json` | JSON object at `"src-lint"` |
+| `pyproject.toml` | TOML tables under `[tool.src-lint]` |
+| `src-lint.yml` or `src-lint.yaml` | YAML block mapping under `src-lint:` |
+
+Shared files may contain unrelated settings. The selected section uses the same settings below; TOML inline tables and YAML anchors are not supported.
 
 Duplicate keys or sections within one document are errors; child configuration files can still override parent values. YAML fields must remain under their containing mapping. Unusable rc files, NUL bytes in configuration or source files, and import paths that exceed resolver capacity exit with `2`.
 

@@ -129,6 +129,12 @@ endforeach()
 add_json_test(toml_quoted_pattern_values config-toml-strings empty -DEXPECTED_EXIT=0)
 add_json_test(go_public_package_root config-go-public-root empty -DEXPECTED_EXIT=0)
 add_json_test(child_config_merge config-child config_child)
+foreach(name package.json pyproject.toml src-lint.yaml src-lint.yml)
+  string(MAKE_C_IDENTIFIER "${name}" config_name)
+  add_cli_test("embedded_config_${config_name}" embedded_config
+    "-DCONFIG_NAME=${name}"
+    "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/embedded-${config_name}")
+endforeach()
 add_cli_test(extensionless_config extensionless_config
   "-DSOURCE_FIXTURE=${FIXTURES}/config-child"
   "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/extensionless-config"

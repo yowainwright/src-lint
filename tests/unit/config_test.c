@@ -35,6 +35,46 @@ static const ConfigCase formats[] = {
      "  orders:\n    root: services/orders\n",
      "boundaries:\n  billing:\n    root: domains/billing\n    public: []\n    allow: []\n"},
     {".src-lintrc", json_parent, json_child, json_clear},
+    {"package.json",
+     "{\"name\":\"sample\",\"private\":true,\"version\":\"2.0.0\","
+     "\"other\":[null,-1.5e+3,{\"src-lint\":false},\"\\u0000\"],"
+     "\"src-lint\":{\"version\":1,\"strict\":true,\"cache\":{\"max_mib\":2},"
+     "\"boundaries\":{\"billing\":{\"root\":\"services/billing\","
+     "\"public\":[\"api/**\",\"proto/**\"],\"allow\":[\"shared/**\"]}}},"
+     "\"scripts\":{\"test\":\"echo \\\"src-lint\\\"\"}}",
+     "{\"src-lint\":{\"strict\":false,\"cache\":{\"max_mib\":0},"
+     "\"boundaries\":{\"billing\":{\"public\":[\"public/**\"]},"
+     "\"orders\":{\"root\":\"services/orders\"}}}}",
+     "{\"src-lint\":{\"boundaries\":{\"billing\":{\"root\":\"domains/billing\","
+     "\"public\":[],\"allow\":[]}}}}"},
+    {"pyproject.toml",
+     "[project]\nname = 'example'\ndescription = '''\n[tool.src-lint]\nstrict = invalid\n'''\n"
+     "dependencies = [\n'other',\n]\n[tool.src-lint]\nversion = 1\nstrict = true\n"
+     "[tool.src-lint.cache]\nmax_mib = 2\n[tool.src-lint.boundaries.billing]\n"
+     "root = \"services/billing\"\npublic = [\"api/**\", \"proto/**\"]\n"
+     "allow = [\"shared/**\"]\n[tool.other]\nstrict = 'unrelated'\n",
+     "[\"tool\".\"src\\u002dlint\"]\nstrict = false\n[tool.src-lint.cache]\nmax_mib = 0\n"
+     "[tool.src-lint.boundaries.billing]\npublic = [\"public/**\"]\n"
+     "[tool.src-lint.boundaries.orders]\nroot = \"services/orders\"\n",
+     "[tool.src-lint.boundaries.billing]\nroot = \"domains/billing\"\n"
+     "public = []\nallow = []\n"},
+    {"src-lint.yaml",
+     "---\n\"meta:data\": Don't read this as policy\nother:\n  src-lint:\n    strict: false\n"
+     "src-lint:\n  version: 1\n  strict: true\n  cache:\n    max_mib: 2\n"
+     "  boundaries:\n    billing:\n      root: services/billing\n"
+     "      public: [api/**, proto/**]\n      allow: [shared/**]\nmetadata: done\n...\n",
+     "\"src-lint\":\n  strict: false\n  cache:\n    max_mib: 0\n  boundaries:\n"
+     "    billing:\n      public: [public/**]\n    orders:\n      root: services/orders\n",
+     "src-lint:\n  boundaries:\n    billing:\n      root: domains/billing\n"
+     "      public: []\n      allow: []\n"},
+    {"src-lint.yml",
+     "src-lint:\n    version: 1\n    strict: true\n    cache:\n      max_mib: 2\n"
+     "    boundaries:\n      billing:\n        root: services/billing\n"
+     "        public: [api/**, proto/**]\n        allow: [shared/**]\n",
+     "src-lint:\n  strict: false\n  cache:\n    max_mib: 0\n  boundaries:\n"
+     "    billing:\n      public: [public/**]\n    orders:\n      root: services/orders\n",
+     "src-lint:\n  boundaries:\n    billing:\n      root: domains/billing\n"
+     "      public: []\n      allow: []\n"},
 };
 
 static void apply_layer(SlConfig *config, const char *path, const char *source) {
@@ -224,6 +264,69 @@ static void check_decoded_root(const char *path, const char *source, const char 
   sl_config_free(&config);
 }
 
+static void invalid_embedded_configs_report_errors(void) {
+  const char *json[] = {"{\"src-lint\":null}",
+                        "{\"src-lint\":[]}",
+                        "{\"src-lint\":{},\"src-lint\":{}}",
+                        "{\"src-lint\":{\"strict\":true,\"strict\":false}}",
+                        "{\"src-lint\":{\"unknown\":0}}",
+                        "{\"metadata\":[true,]}",
+                        "{\"metadata\":01}",
+                        "{\"metadata\":\"\\",
+                        "{\"metadata\":{\"key\":false,}}",
+                        "{\"src-lint\":{}} trailing"};
+  for (size_t index = 0; index < COUNT(json); index += 1)
+    check_invalid("package.json", json[index], "invalid JSON configuration");
+  const char *toml[] = {"[tool.src-lint]\nstrict = true\nstrict = false",
+                        "[tool.src-lint]\n[tool.src-lint]",
+                        "[tool.src-lint.unknown]\nx = 1",
+                        "[[tool.src-lint]]",
+                        "[tool]\nsrc-lint = 1",
+                        "tool.src-lint.strict = true",
+                        "[project]\ntext = '''unterminated"};
+  for (size_t index = 0; index < COUNT(toml); index += 1)
+    check_invalid("pyproject.toml", toml[index], "invalid TOML configuration");
+  const char *yaml[] = {"src-lint: null",
+                        "src-lint: []",
+                        "src-lint: {}\nsrc-lint: {}",
+                        "src-lint:\n  strict: true\n  strict: false",
+                        "src-lint:\n  unknown: true",
+                        "src-lint:\n  strict: true\n    cache:\n      max_mib: 1",
+                        "other: [unterminated",
+                        "---\nsrc-lint: {}\n---\nsrc-lint: {}"};
+  for (size_t index = 0; index < COUNT(yaml); index += 1)
+    check_invalid("src-lint.yaml", yaml[index], "invalid YAML configuration");
+}
+
+static void unrelated_settings_do_not_configure_policy(void) {
+  const char *paths[] = {"package.json", "pyproject.toml", "src-lint.yml", "src-lint.yaml"};
+  const char *contents[] = {
+      "{\"name\":\"src-lint\",\"other\":{\"src-lint\":{\"strict\":true}}}",
+      ("[project]\nreadme = \"\"\"\n[tool.src-lint]\nstrict = true\n\"\"\"\n"
+       "[tool.src-lint-other]\nstrict = true\n[\"tool.src-lint\"]\nstrict = true"),
+      "other: |\n  src-lint:\n    strict: true\nmetadata:\n  src-lint: {}",
+      "other: {\nsrc-lint: {strict: true}\n}\ntext: \"src-lint:\n  strict: true\""};
+  for (size_t index = 0; index < COUNT(paths); index += 1) {
+    SlConfig config;
+    sl_config_init(&config);
+    apply_layer(&config, paths[index], contents[index]);
+    check_defaults(&config);
+    sl_config_free(&config);
+  }
+}
+
+static void truncated_package_json_reports_errors(void) {
+  const char *source = "{\"metadata\":[{\"text\":\"\\ud83d\\ude00\"}],\"src-lint\":{}}";
+  char *content = strdup(source);
+  CHECK(content != NULL);
+  for (size_t length = 0; length < strlen(source); length += 1) {
+    memcpy(content, source, length);
+    content[length] = '\0';
+    check_invalid("package.json", content, "invalid JSON configuration");
+  }
+  free(content);
+}
+
 static void decoded_strings_preserve_policy_text(void) {
   check_decoded_root(".src-lintrc.toml",
                      "[boundaries.billing]\nroot = \"quote\\\"#entry\" # comment", "quote\"#entry");
@@ -260,6 +363,9 @@ int main(void) {
   invalid_toml_reports_errors();
   invalid_json_reports_errors();
   invalid_yaml_reports_errors();
+  invalid_embedded_configs_report_errors();
+  unrelated_settings_do_not_configure_policy();
+  truncated_package_json_reports_errors();
   decoded_strings_preserve_policy_text();
   policy_changes_invalidate_hash();
   return 0;

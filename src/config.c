@@ -7,9 +7,11 @@
 #include <sys/stat.h>
 
 const SlConfigFile sl_config_files[] = {
-    {".src-lintrc", SL_CONFIG_JSON},      {".src-lintrc.toml", SL_CONFIG_TOML},
-    {".src-lintrc.json", SL_CONFIG_JSON}, {".src-lintrc.yaml", SL_CONFIG_YAML},
-    {".src-lintrc.yml", SL_CONFIG_YAML},
+    {".src-lintrc", SL_CONFIG_JSON, false},      {".src-lintrc.toml", SL_CONFIG_TOML, false},
+    {".src-lintrc.json", SL_CONFIG_JSON, false}, {".src-lintrc.yaml", SL_CONFIG_YAML, false},
+    {".src-lintrc.yml", SL_CONFIG_YAML, false},  {"package.json", SL_CONFIG_JSON, true},
+    {"pyproject.toml", SL_CONFIG_TOML, true},    {"src-lint.yaml", SL_CONFIG_YAML, true},
+    {"src-lint.yml", SL_CONFIG_YAML, true},
 };
 
 const size_t sl_config_file_count = sizeof(sl_config_files) / sizeof(*sl_config_files);
@@ -30,6 +32,13 @@ typedef struct {
   SlConfigSection section;
   SlBoundaryConfig *boundary;
   bool cache_seen;
+  bool selected;
+  bool root_seen;
+  bool tool_table;
+  bool any_table;
+  char quote;
+  bool multiline;
+  size_t depth;
 } SlTomlState;
 
 typedef struct {
@@ -57,6 +66,16 @@ typedef struct {
   SlPatternList *patterns;
   unsigned seen;
 } SlYamlState;
+
+typedef struct {
+  SlYamlState policy;
+  bool selected;
+  size_t indent;
+  char quote;
+  size_t depth;
+  bool started;
+  bool ended;
+} SlYamlDocument;
 
 static char *duplicate_string(const char *value) {
   const size_t length = strlen(value) + 1;
@@ -236,6 +255,30 @@ static bool decode_toml_escape(char input, char *output) {
   return true;
 }
 
+static bool read_hex_digits(const char *input, size_t count, uint32_t *value);
+static void write_utf8(char **output, uint32_t codepoint);
+
+static bool copy_toml_character_escape(char escape, char **output) {
+  char decoded;
+  if (!decode_toml_escape(escape, &decoded)) return false;
+  *(*output)++ = decoded;
+  return true;
+}
+
+static bool copy_toml_escape(const char **cursor, const char *end, char **output) {
+  const char escape = *(*cursor)++;
+  if (escape != 'u' && escape != 'U') return copy_toml_character_escape(escape, output);
+  const size_t digits = escape == 'u' ? 4 : 8;
+  uint32_t codepoint;
+  if ((size_t)(end - *cursor) < digits || !read_hex_digits(*cursor, digits, &codepoint))
+    return false;
+  const bool surrogate = codepoint >= 0xd800 && codepoint <= 0xdfff;
+  if (codepoint == 0 || codepoint > 0x10ffff || surrogate) return false;
+  *cursor += digits;
+  write_utf8(output, codepoint);
+  return true;
+}
+
 static bool copy_toml_string(const char *cursor, const char *end, char *output) {
   while (cursor < end) {
     if (*cursor == '"') return false;
@@ -245,10 +288,7 @@ static bool copy_toml_string(const char *cursor, const char *end, char *output) 
       continue;
     }
     cursor += 1;
-    char decoded;
-    if (cursor >= end || !decode_toml_escape(*cursor, &decoded)) return false;
-    *output++ = decoded;
-    cursor += 1;
+    if (cursor >= end || !copy_toml_escape(&cursor, end, &output)) return false;
   }
   *output = '\0';
   return true;
@@ -380,17 +420,136 @@ static bool parse_boundary_section(char *name, SlConfig *config, SlTomlState *st
   return state->boundary != NULL;
 }
 
-static bool parse_section(char *line, SlConfig *config, SlTomlState *state) {
-  const size_t length = strlen(line);
-  if (length < 3 || line[0] != '[' || line[length - 1] != ']') return false;
-  line[length - 1] = '\0';
-  char *name = trim(line + 1);
+static bool parse_section_name(char *name, SlConfig *config, SlTomlState *state) {
   if (strcmp(name, "cache") != 0) return parse_boundary_section(name, config, state);
   if (state->cache_seen) return false;
   state->cache_seen = true;
   state->section = SL_CONFIG_CACHE;
   state->boundary = NULL;
   return true;
+}
+
+static bool parse_section(char *line, SlConfig *config, SlTomlState *state) {
+  const size_t length = strlen(line);
+  if (length < 3 || line[0] != '[' || line[length - 1] != ']') return false;
+  line[length - 1] = '\0';
+  return parse_section_name(trim(line + 1), config, state);
+}
+
+static bool take_toml_quoted_key(char **cursor, const char *key) {
+  char *end = toml_string_end(*cursor);
+  if (!end) return false;
+  const char saved = *end;
+  *end = '\0';
+  char *decoded = parse_string(*cursor);
+  *end = saved;
+  const bool matches = decoded && strcmp(decoded, key) == 0;
+  free(decoded);
+  *cursor = trim_left(end);
+  return matches;
+}
+
+static bool take_toml_key(char **cursor, const char *key) {
+  *cursor = trim_left(*cursor);
+  if (**cursor == '"') return take_toml_quoted_key(cursor, key);
+  char *start = trim_left(*cursor);
+  const char quote = *start == '"' || *start == '\'' ? *start++ : '\0';
+  char *end = quote ? strchr(start, quote) : start + strcspn(start, ". \t=]");
+  if (!end) return false;
+  const size_t length = (size_t)(end - start);
+  *cursor = trim_left(end + (quote != '\0'));
+  return length == strlen(key) && memcmp(start, key, length) == 0;
+}
+
+static bool toml_tool_key(char **cursor) {
+  if (!take_toml_key(cursor, "tool") || **cursor != '.') return false;
+  *cursor += 1;
+  return take_toml_key(cursor, "src-lint");
+}
+
+static char *toml_section_name(char *line) {
+  strip_config_comment(line);
+  trim_right(line);
+  const size_t length = strlen(line);
+  if (length < 3 || line[length - 1] != ']') return NULL;
+  line[length - 1] = '\0';
+  return trim(line + 1);
+}
+
+static bool select_toml_section(char *line, SlConfig *config, SlTomlState *state) {
+  char *name = toml_section_name(line);
+  if (!name) return false;
+  state->any_table = true;
+  const bool array = *name == '[';
+  if (array) name = trim_left(name + 1);
+  char *cursor = name;
+  state->tool_table = take_toml_key(&cursor, "tool") && *cursor == '\0';
+  state->selected = toml_tool_key(&name);
+  if (!state->selected) return true;
+  if (array) return false;
+  config->present = true;
+  if (*name == '.') return parse_section_name(trim(name + 1), config, state);
+  if (*name != '\0' || state->root_seen) return false;
+  state->root_seen = true;
+  state->section = SL_CONFIG_ROOT;
+  return true;
+}
+
+static char *skip_toml_quote(char *cursor, SlTomlState *state) {
+  if (state->quote == '"' && *cursor == '\\' && cursor[1]) return cursor + 2;
+  const char *triple = state->quote == '"' ? "\"\"\"" : "'''";
+  if (state->multiline && strncmp(cursor, triple, 3) != 0) return cursor + 1;
+  if (*cursor != state->quote) return cursor + 1;
+  size_t length = state->multiline ? 3 : 1;
+  while (state->multiline && length < 5 && cursor[length] == state->quote) length += 1;
+  state->quote = '\0';
+  return cursor + length;
+}
+
+static bool track_container(char character, size_t *depth) {
+  if (character == '[' || character == '{') *depth += 1;
+  if (character != ']' && character != '}') return true;
+  if (!*depth) return false;
+  *depth -= 1;
+  return true;
+}
+
+static char *open_toml_quote(char *cursor, SlTomlState *state) {
+  state->quote = *cursor;
+  const char *triple = *cursor == '"' ? "\"\"\"" : "'''";
+  state->multiline = strncmp(cursor, triple, 3) == 0;
+  return cursor + (state->multiline ? 3 : 1);
+}
+
+static bool skip_toml_line(char *cursor, SlTomlState *state) {
+  while (*cursor) {
+    if (state->quote) {
+      cursor = skip_toml_quote(cursor, state);
+      continue;
+    }
+    if (*cursor == '#') break;
+    if (*cursor == '"' || *cursor == '\'') {
+      cursor = open_toml_quote(cursor, state);
+      continue;
+    }
+    if (!track_container(*cursor, &state->depth)) return false;
+    cursor += 1;
+  }
+  return !state->quote || state->multiline;
+}
+
+static bool parse_toml_line(char *line, SlConfig *config, SlTomlState *state);
+
+static bool embedded_toml_line(char *line, SlConfig *config, SlTomlState *state) {
+  if (state->quote || state->depth) return skip_toml_line(line, state);
+  line = trim_left(line);
+  if (*line == '[') return select_toml_section(line, config, state);
+  if (state->selected) return parse_toml_line(line, config, state);
+  char *cursor = line;
+  const bool tool_key = state->tool_table ? take_toml_key(&cursor, "src-lint")
+                                          : !state->any_table && toml_tool_key(&cursor);
+  if (tool_key) return false;
+  return skip_toml_line(line, state);
 }
 
 static bool apply_toml_value(SlConfig *config, SlTomlState *state, char *line) {
@@ -412,14 +571,16 @@ static bool parse_toml_line(char *line, SlConfig *config, SlTomlState *state) {
   return apply_toml_value(config, state, line);
 }
 
-static bool parse_toml(const char *path, char *content, SlConfig *config, FILE *errors) {
+static bool parse_toml(const char *path, char *content, SlConfig *config, FILE *errors,
+                       bool embedded) {
   SlTomlState state = {.section = SL_CONFIG_ROOT};
   char *line = content;
   size_t line_number = 1;
   while (*line) {
     char *next = strchr(line, '\n');
     if (next) *next = '\0';
-    const bool parsed = parse_toml_line(line, config, &state);
+    const bool parsed =
+        embedded ? embedded_toml_line(line, config, &state) : parse_toml_line(line, config, &state);
     if (!parsed) {
       config_error(errors, path, line_number, "invalid TOML configuration");
       return false;
@@ -428,7 +589,9 @@ static bool parse_toml(const char *path, char *content, SlConfig *config, FILE *
     line = next + 1;
     line_number += 1;
   }
-  return true;
+  if (!state.quote && !state.depth) return true;
+  config_error(errors, path, line_number, "invalid TOML configuration");
+  return false;
 }
 
 static void json_skip_space(SlJsonParser *parser) {
@@ -750,9 +913,112 @@ static size_t json_line(const SlJsonParser *parser) {
   return line;
 }
 
-static bool parse_json(const char *path, char *content, SlConfig *config, FILE *errors) {
+static bool json_skip_escape(SlJsonParser *parser) {
+  const char escape = *parser->cursor;
+  if (!escape) return false;
+  parser->cursor += 1;
+  if (escape != 'u') return strchr("\"\\/bfnrt", escape) != NULL;
+  uint32_t codepoint;
+  const char *cursor = parser->cursor;
+  if (!read_unicode_escape(&cursor, &codepoint)) return false;
+  parser->cursor = (char *)cursor;
+  return true;
+}
+
+static bool json_skip_string(SlJsonParser *parser) {
+  if (!json_take(parser, '"')) return false;
+  while (*parser->cursor && *parser->cursor != '"') {
+    const unsigned char character = (unsigned char)*parser->cursor++;
+    if (character < 0x20) return false;
+    if (character == '\\' && !json_skip_escape(parser)) return false;
+  }
+  return json_take(parser, '"');
+}
+
+static bool json_digits(SlJsonParser *parser) {
+  char *start = parser->cursor;
+  while (*parser->cursor >= '0' && *parser->cursor <= '9') parser->cursor += 1;
+  return start != parser->cursor;
+}
+
+static bool json_skip_fraction(SlJsonParser *parser) {
+  if (*parser->cursor != '.') return true;
+  parser->cursor += 1;
+  return json_digits(parser);
+}
+
+static bool json_skip_number(SlJsonParser *parser) {
+  if (*parser->cursor == '-') parser->cursor += 1;
+  if (*parser->cursor == '0')
+    parser->cursor += 1;
+  else if (!json_digits(parser))
+    return false;
+  if (!json_skip_fraction(parser)) return false;
+  if (*parser->cursor != 'e' && *parser->cursor != 'E') return true;
+  parser->cursor += 1;
+  if (*parser->cursor == '+' || *parser->cursor == '-') parser->cursor += 1;
+  return json_digits(parser);
+}
+
+static bool json_skip_value(SlJsonParser *parser, size_t depth);
+
+static bool json_skip_container(SlJsonParser *parser, size_t depth) {
+  const bool object = *parser->cursor++ == '{';
+  const char end = object ? '}' : ']';
+  if (json_take(parser, end)) return true;
+  while (true) {
+    if (object && (!json_skip_string(parser) || !json_take(parser, ':'))) return false;
+    if (!json_skip_value(parser, depth + 1)) return false;
+    if (json_take(parser, end)) return true;
+    if (!json_take(parser, ',')) return false;
+  }
+}
+
+static bool json_skip_value(SlJsonParser *parser, size_t depth) {
+  if (depth > 128) return false;
+  json_skip_space(parser);
+  if (*parser->cursor == '"') return json_skip_string(parser);
+  if (*parser->cursor == '{' || *parser->cursor == '[') return json_skip_container(parser, depth);
+  const char *literals[] = {"true", "false", "null"};
+  for (size_t index = 0; index < sizeof(literals) / sizeof(*literals); index += 1) {
+    const size_t length = strlen(literals[index]);
+    if (strncmp(parser->cursor, literals[index], length) != 0) continue;
+    parser->cursor += length;
+    return true;
+  }
+  return json_skip_number(parser);
+}
+
+static bool parse_json_package_value(SlJsonParser *parser, SlConfig *config, const char *key) {
+  if (strcmp(key, "src-lint") != 0) return json_skip_value(parser, 0);
+  if (config->present) return false;
+  config->present = true;
+  return json_take(parser, '{') && parse_json_members(parser, config);
+}
+
+static bool parse_json_package(SlJsonParser *parser, SlConfig *config) {
+  if (json_take(parser, '}')) return true;
+  while (true) {
+    char *key = json_string(parser);
+    const bool colon = key && json_take(parser, ':');
+    const bool parsed = colon && parse_json_package_value(parser, config, key);
+    free(key);
+    if (!parsed) return false;
+    bool done;
+    if (!json_more(parser, &done)) return false;
+    if (done) return true;
+  }
+}
+
+static bool parse_json(const char *path, char *content, SlConfig *config, FILE *errors,
+                       bool embedded) {
   SlJsonParser parser = {content, content};
-  const bool object = json_take(&parser, '{') && parse_json_members(&parser, config);
+  if (!json_take(&parser, '{')) {
+    config_error(errors, path, json_line(&parser), "invalid JSON configuration");
+    return false;
+  }
+  const bool object =
+      embedded ? parse_json_package(&parser, config) : parse_json_members(&parser, config);
   json_skip_space(&parser);
   const bool complete = object && *parser.cursor == '\0';
   if (!complete) config_error(errors, path, json_line(&parser), "invalid JSON configuration");
@@ -942,14 +1208,98 @@ static bool parse_yaml_line(SlConfig *config, SlYamlState *state, char *line) {
   return parse_yaml_mapping(config, state, indent, line + indent);
 }
 
-static bool parse_yaml(const char *path, char *content, SlConfig *config, FILE *errors) {
+static char *skip_yaml_quote(char *cursor, SlYamlDocument *document) {
+  if (document->quote == '"' && *cursor == '\\' && cursor[1]) return cursor + 2;
+  if (document->quote == '\'' && *cursor == '\'' && cursor[1] == '\'') return cursor + 2;
+  if (*cursor == document->quote) document->quote = '\0';
+  return cursor + 1;
+}
+
+static bool skip_yaml_value(char *cursor, SlYamlDocument *document) {
+  cursor = trim_left(cursor);
+  if (!document->quote && !document->depth && !strchr("[{'\"", *cursor)) return true;
+  while (*cursor) {
+    if (document->quote) {
+      cursor = skip_yaml_quote(cursor, document);
+      continue;
+    }
+    if (*cursor == '#') break;
+    if (*cursor == '"' || *cursor == '\'') document->quote = *cursor;
+    if (!track_container(*cursor, &document->depth)) return false;
+    cursor += 1;
+  }
+  return true;
+}
+
+static char *yaml_quoted_document_key(char **line) {
+  char *key = yaml_quoted_scalar(line);
+  *line = trim_left(*line);
+  if (!key || **line != ':') {
+    free(key);
+    return NULL;
+  }
+  *line = trim(*line + 1);
+  return key;
+}
+
+static char *yaml_document_key(char **line) {
+  if (**line == '\'' || **line == '"') return yaml_quoted_document_key(line);
+  char *key;
+  char *value;
+  if (!split_yaml(*line, &key, &value)) return NULL;
+  *line = value;
+  return duplicate_string(key);
+}
+
+static bool select_yaml_section(char *line, SlConfig *config, SlYamlDocument *document) {
+  char *decoded = yaml_document_key(&line);
+  if (!decoded) return false;
+  document->selected = strcmp(decoded, "src-lint") == 0;
+  free(decoded);
+  document->indent = SIZE_MAX;
+  if (!document->selected) return skip_yaml_value(line, document);
+  if (config->present) return false;
+  config->present = true;
+  if (*line == '\0') return true;
+  document->selected = false;
+  return strcmp(line, "{}") == 0;
+}
+
+static bool yaml_document_marker(const char *line, SlYamlDocument *document) {
+  if (document->ended) return false;
+  const bool start = strcmp(line, "---") == 0;
+  if (start && document->started) return false;
+  document->started = true;
+  document->ended = strcmp(line, "...") == 0;
+  return true;
+}
+
+static bool embedded_yaml_line(char *line, SlConfig *config, SlYamlDocument *document) {
+  if (document->quote || document->depth) return skip_yaml_value(line, document);
+  strip_config_comment(line);
+  trim_right(line);
+  const size_t indent = yaml_indent(line);
+  if (!line[indent]) return true;
+  if (!yaml_document_marker(line, document)) return false;
+  if (strcmp(line, "---") == 0 || document->ended) return true;
+  if (!indent) return select_yaml_section(line, config, document);
+  if (!document->selected) return true;
+  if (document->indent == SIZE_MAX) document->indent = indent;
+  if (indent < document->indent) return false;
+  return parse_yaml_line(config, &document->policy, line + document->indent);
+}
+
+static bool parse_yaml(const char *path, char *content, SlConfig *config, FILE *errors,
+                       bool embedded) {
   SlYamlState state = {.section = SL_YAML_ROOT};
+  SlYamlDocument document = {.indent = SIZE_MAX};
   char *line = content;
   size_t line_number = 1;
   while (*line) {
     char *next = strchr(line, '\n');
     if (next) *next = '\0';
-    const bool parsed = parse_yaml_line(config, &state, line);
+    const bool parsed = embedded ? embedded_yaml_line(line, config, &document)
+                                 : parse_yaml_line(config, &state, line);
     if (!parsed) {
       config_error(errors, path, line_number, "invalid YAML configuration");
       return false;
@@ -958,7 +1308,9 @@ static bool parse_yaml(const char *path, char *content, SlConfig *config, FILE *
     line = next + 1;
     line_number += 1;
   }
-  return true;
+  if (!document.quote && !document.depth) return true;
+  config_error(errors, path, line_number, "invalid YAML configuration");
+  return false;
 }
 
 static bool grow_paths(SlPathList *paths) {
@@ -991,7 +1343,25 @@ static int config_file_status(const char *path) {
   return 1;
 }
 
-static int config_in_directory(const char *directory, char *path) {
+static int embedded_config_status(const char *path, FILE *errors) {
+  char *content = read_file(path);
+  if (!content) return -1;
+  SlConfig config;
+  sl_config_init(&config);
+  const bool parsed = sl_config_parse(path, content, &config, errors);
+  const int status = parsed ? (int)config.present : -1;
+  sl_config_free(&config);
+  free(content);
+  return status;
+}
+
+static int active_config_status(const char *path, const SlConfigFile *file, FILE *errors) {
+  const int status = config_file_status(path);
+  if (status != 1 || !file->embedded) return status;
+  return embedded_config_status(path, errors);
+}
+
+static int config_in_directory(const char *directory, char *path, FILE *errors) {
   int found = 0;
   path[0] = '\0';
   for (size_t index = 0; index < sl_config_file_count; index += 1) {
@@ -999,7 +1369,7 @@ static int config_in_directory(const char *directory, char *path) {
     const int written =
         snprintf(candidate, sizeof(candidate), "%s/%s", directory, sl_config_files[index].name);
     if (written < 0 || (size_t)written >= sizeof(candidate)) return -1;
-    const int status = config_file_status(candidate);
+    const int status = active_config_status(candidate, &sl_config_files[index], errors);
     if (status < 0) return -1;
     if (status == 0) continue;
     found += 1;
@@ -1050,7 +1420,7 @@ static bool find_git_root(const char *directory, char *root) {
 
 static bool collect_directory_config(const char *directory, SlPathList *paths, FILE *errors) {
   char config_path[SL_PATH_CAPACITY];
-  const int count = config_in_directory(directory, config_path);
+  const int count = config_in_directory(directory, config_path, errors);
   if (count < 0) {
     fprintf(errors, "src-lint: cannot inspect configuration in %s\n", directory);
     return false;
@@ -1089,9 +1459,12 @@ static bool parse_config_layer(const char *path, char *content, SlConfig *config
     config_error(errors, path, 1, "unsupported configuration filename");
     return false;
   }
-  if (file->format == SL_CONFIG_JSON) return parse_json(path, content, config, errors);
-  if (file->format == SL_CONFIG_YAML) return parse_yaml(path, content, config, errors);
-  return parse_toml(path, content, config, errors);
+  config->present = !file->embedded;
+  if (file->format == SL_CONFIG_JSON)
+    return parse_json(path, content, config, errors, file->embedded);
+  if (file->format == SL_CONFIG_YAML)
+    return parse_yaml(path, content, config, errors, file->embedded);
+  return parse_toml(path, content, config, errors, file->embedded);
 }
 
 static void merge_patterns(SlPatternList *target, SlPatternList *layer) {
@@ -1116,6 +1489,7 @@ static bool merge_boundary(SlConfig *config, SlBoundaryConfig *layer) {
 }
 
 static bool merge_config(SlConfig *config, SlConfig *layer) {
+  config->present = config->present || layer->present;
   if (layer->version_set) {
     config->version = layer->version;
     config->version_set = true;

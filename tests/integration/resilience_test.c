@@ -48,16 +48,22 @@ static void rejects_nul_bytes(void) {
   CHECK(unlink(".src-lintrc.json") == 0);
 }
 
+static void reject_unusable_path(const char *path) {
+  CHECK(symlink("missing.json", path) == 0);
+  expect_scan(SL_COMMAND_CHECK, 2, NULL);
+  CHECK(unlink(path) == 0);
+  CHECK(mkdir(path, 0700) == 0);
+  expect_scan(SL_COMMAND_CHECK, 2, NULL);
+  CHECK(rmdir(path) == 0);
+  CHECK(mkfifo(path, 0600) == 0);
+  expect_scan(SL_COMMAND_CHECK, 2, NULL);
+  CHECK(unlink(path) == 0);
+}
+
 static void rejects_unusable_config(void) {
-  CHECK(symlink("missing.json", ".src-lintrc.json") == 0);
-  expect_scan(SL_COMMAND_CHECK, 2, NULL);
-  CHECK(unlink(".src-lintrc.json") == 0);
-  CHECK(mkdir(".src-lintrc.json", 0700) == 0);
-  expect_scan(SL_COMMAND_CHECK, 2, NULL);
-  CHECK(rmdir(".src-lintrc.json") == 0);
-  CHECK(mkfifo(".src-lintrc.json", 0600) == 0);
-  expect_scan(SL_COMMAND_CHECK, 2, NULL);
-  CHECK(unlink(".src-lintrc.json") == 0);
+  const char *paths[] = {".src-lintrc.json", "package.json", "pyproject.toml", "src-lint.yaml",
+                         "src-lint.yml"};
+  for (size_t index = 0; index < COUNT(paths); index += 1) reject_unusable_path(paths[index]);
   expect_scan(SL_COMMAND_CHECK, 1, "SL2001");
 }
 
