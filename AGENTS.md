@@ -7,6 +7,7 @@ This repository provides src-lint, a C11 CLI for checking import boundaries acro
 - Keep architecture notes in `tmp/*.md` aligned before commit-ready work.
 - Keep checkouts, verification copies, and build work inside this workspace. Ask before modifying another repository.
 - No snowflakes. Reuse the project's tools and patterns; do not introduce new architecture.
+- Less is more. Prefer the smallest clear solution; avoid unnecessary code, comments, and documentation.
 
 ## Communication Style
 

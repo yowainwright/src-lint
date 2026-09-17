@@ -12,6 +12,18 @@ foreach(command IN LISTS commands)
   endif()
 endforeach()
 
+string(FIND "${help_output}" "--config file" config_position)
+if(config_position EQUAL -1)
+  message(FATAL_ERROR "Help is missing --config")
+endif()
+foreach(arguments "--config" "--config;--strict" "--config;a.json;--config;b.json")
+  execute_process(COMMAND "${CLI}" check ${arguments}
+    RESULT_VARIABLE result OUTPUT_QUIET ERROR_QUIET)
+  if(NOT result EQUAL 2)
+    message(FATAL_ERROR "Invalid config arguments accepted: ${arguments}")
+  endif()
+endforeach()
+
 execute_process(
   COMMAND "${CLI}" graph . --format text
   RESULT_VARIABLE graph_result

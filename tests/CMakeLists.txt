@@ -129,10 +129,18 @@ endforeach()
 add_json_test(toml_quoted_pattern_values config-toml-strings empty -DEXPECTED_EXIT=0)
 add_json_test(go_public_package_root config-go-public-root empty -DEXPECTED_EXIT=0)
 add_json_test(child_config_merge config-child config_child)
+foreach(name package.json pyproject.toml src-lint.yaml src-lint.yml)
+  string(MAKE_C_IDENTIFIER "${name}" config_name)
+  add_cli_test("embedded_config_${config_name}" embedded_config
+    "-DCONFIG_NAME=${name}"
+    "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/embedded-${config_name}")
+endforeach()
 add_cli_test(extensionless_config extensionless_config
   "-DSOURCE_FIXTURE=${FIXTURES}/config-child"
   "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/extensionless-config"
   "-DEXPECTED=${EXPECTED_ROOT}/config_child.json")
+add_cli_test(explicit_config explicit_config
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/explicit-config")
 foreach(name .src-lintrc .src-lintrc.json .src-lintrc.toml .src-lintrc.yaml .src-lintrc.yml)
   string(MAKE_C_IDENTIFIER "${name}" config_name)
   add_cli_test("config_without_sources_${config_name}" config_without_sources
@@ -206,6 +214,11 @@ add_cli_test(graph_proto graph_language "-DFIXTURE=${FIXTURES}/proto-import" -DL
 
 add_cli_test(cli_usage cli_usage)
 add_cli_test(cli_version cli_version "-DVERSION=${PROJECT_VERSION}")
+add_cli_test(release_version release_version
+  "-DREPO_ROOT=${PROJECT_SOURCE_DIR}"
+  "-DC_COMPILER=${CMAKE_C_COMPILER}"
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/version-work")
+set_tests_properties(release_version PROPERTIES LABELS "e2e;release" TIMEOUT 120)
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
   add_cli_test(cli_install cli_install
     "-DBUILD_ROOT=${PROJECT_BINARY_DIR}" "-DBUILD_CONFIG=$<CONFIG>"

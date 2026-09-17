@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "newFiles": {
+    "default": "deny",
+    "allow": [
+      "{AGENTS.md,CMakeLists.txt,LICENSE,README.md,VERSION,fs-lint.json,.gitignore,.codependencerc}",
+      ".github/CODEOWNERS",
+      ".github/**/*.yml",
+      ".github/*.md",
+      "cmake/*.cmake",
+      "include/src_lint/*.h",
+      "src/*.{c,h}",
+      "scripts/*.{sh,cmake}",
+      "scripts/{Brewfile,.clang-format,.clang-tidy,update-tap-package}",
+      "scripts/hooks/{pre-commit,pre-push,post-merge}",
+      "tests/**/CMakeLists.txt",
+      "tests/{unit,integration}/*.{c,h}",
+      "tests/{e2e,integration/scripts}/*.{cmake,rb}",
+      "tests/expected/*.json",
+      "tests/fixtures/**"
+    ]
+  }
+}

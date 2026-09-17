@@ -14,6 +14,7 @@
 
 typedef struct {
   char root[SL_PATH_CAPACITY];
+  const char *config_path;
   SlCommand command;
   SlFormat format;
   bool strict;
@@ -695,7 +696,8 @@ static bool load_target_policy(SlContext *context, const SlConfig *config, const
   const int target_length = snprintf(target_path, sizeof(target_path), "/%s", target);
   if (source_length < 0 || source_length >= SL_PATH_CAPACITY) return false;
   if (target_length < 0 || target_length >= SL_PATH_CAPACITY) return false;
-  return sl_config_load_for_import(source_path, target_path, target_config, context->errors);
+  return sl_config_load_for_import(source_path, target_path, context->config_path, target_config,
+                                   context->errors);
 }
 
 static bool allowed_by_source(const SlConfig *config, const char *source, const char *target) {
@@ -849,7 +851,7 @@ static int scan_file(SlContext *context, const char *path) {
   char *content = load_file(path, context->errors);
   if (!content) return -1;
   SlConfig config;
-  if (!sl_config_load_for_file(path, &config, context->errors)) {
+  if (!sl_config_load_for_file(path, context->config_path, &config, context->errors)) {
     free(content);
     return -1;
   }
@@ -868,7 +870,7 @@ static bool entry_error(const FTSENT *entry) {
 
 static bool validate_config_entry(SlContext *context, const char *path) {
   SlConfig config;
-  if (!sl_config_load_for_file(path, &config, context->errors)) return false;
+  if (!sl_config_load_for_file(path, context->config_path, &config, context->errors)) return false;
   sl_config_free(&config);
   return true;
 }
@@ -1003,10 +1005,22 @@ static int finish_run(SlContext *context, int findings) {
   return findings == 0 ? 0 : 1;
 }
 
+static bool set_run_config(SlContext *context, const char *path, char *canonical) {
+  if (!path) return true;
+  if (!*path || !realpath(path, canonical)) {
+    report_path_error(context->errors, "load configuration ", path);
+    return false;
+  }
+  context->config_path = canonical;
+  return validate_config_entry(context, canonical);
+}
+
 int sl_run(const SlRunOptions *options, FILE *output, FILE *errors) {
   if (!valid_options(options) || !output || !errors) return 2;
   SlContext context = make_context(options, output, errors);
   if (!set_scan_root(&context, options->root)) return 2;
+  char config_path[SL_PATH_CAPACITY];
+  if (!set_run_config(&context, options->config_path, config_path)) return 2;
   if (writes_check_json(&context)) fputs("{\n  \"findings\": [\n", output);
   const int findings = scan_tree(&context);
   if (writes_check_json(&context)) fputs("\n  ]\n}\n", output);
@@ -1015,6 +1029,7 @@ int sl_run(const SlRunOptions *options, FILE *output, FILE *errors) {
 
 int sl_check(const SlCheckOptions *options, FILE *output, FILE *errors) {
   if (!options) return 2;
-  const SlRunOptions run = {options->root, SL_COMMAND_CHECK, options->format, options->strict};
+  const SlRunOptions run = {options->root, SL_COMMAND_CHECK, options->format, options->strict,
+                            options->config_path};
   return sl_run(&run, output, errors);
 }

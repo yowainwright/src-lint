@@ -12,6 +12,7 @@ typedef struct {
   const char *root;
   SlFormat format;
   bool strict;
+  const char *config_path;
 } SlCheckOptions;
 
 typedef struct {
@@ -19,6 +20,7 @@ typedef struct {
   SlCommand command;
   SlFormat format;
   bool strict;
+  const char *config_path;
 } SlRunOptions;
 
 int sl_check(const SlCheckOptions *options, FILE *output, FILE *errors);

@@ -17,9 +17,9 @@ require_tag() {
 }
 
 verify_version() {
-  local output
-  output="$("$1" --version)"
-  [[ "$output" == "src-lint ${2#v}" ]] || fail 'tag does not match binary version'
+  local binary="${1:?}" tag="${2:?}" output
+  output="$("$binary" --version)"
+  [[ "$output" == "src-lint ${tag#v}" ]] || fail 'tag does not match binary version'
 }
 
 require_tap() {
@@ -34,7 +34,7 @@ require_tap() {
 }
 
 verify_asset() {
-  local asset="$1" tag="$2" digest
+  local asset="${1:?}" tag="${2:?}" digest
   [[ -s "$asset" ]] || fail "missing binary: $asset"
   digest="$(shasum -a 256 "$asset")"
   [[ "$(cat "$asset.sha256")" == "$digest" ]] || fail "checksum mismatch: $asset"
@@ -45,7 +45,7 @@ verify_asset() {
 }
 
 verify_release() {
-  local tag="$1" target published
+  local tag="${1:?}" target published
   published="$(gh release view "$tag" --repo "$RELEASE_REPOSITORY" \
     --json isDraft,isPrerelease,tagName --jq '[.isDraft, .isPrerelease, .tagName] | @tsv')"
   [[ "$published" == "$(printf 'false\tfalse\t%s' "$tag")" ]] || fail 'release is not published and stable'
@@ -60,29 +60,30 @@ verify_release() {
 verify_host_version() {
   local target
   case "$(uname -s)-$(uname -m)" in
-    Darwin-arm64) target=darwin-arm64 ;;
-    Darwin-x86_64) target=darwin-amd64 ;;
-    Linux-aarch64 | Linux-arm64) target=linux-arm64 ;;
-    Linux-x86_64) target=linux-amd64 ;;
-    *) fail 'unsupported host for release verification' ;;
+  Darwin-arm64) target=darwin-arm64 ;;
+  Darwin-x86_64) target=darwin-amd64 ;;
+  Linux-aarch64 | Linux-arm64) target=linux-arm64 ;;
+  Linux-x86_64) target=linux-amd64 ;;
+  *) fail 'unsupported host for release verification' ;;
   esac
   chmod +x "$release_dir/src-lint-$target"
   verify_version "$release_dir/src-lint-$target" "$1"
 }
 
 prepare_branch() {
-  local branch="$1" existing
+  local branch="${1:?}" existing
   existing="$(git ls-remote --heads origin "$branch")"
-  if [[ -n "$existing" ]]; then
+  case "$existing" in
+  "") git checkout -b "$branch" ;;
+  *)
     git fetch origin "$branch"
     git checkout -b "$branch" FETCH_HEAD
-    return
-  fi
-  git checkout -b "$branch"
+    ;;
+  esac
 }
 
 generate_formula() {
-  local version="$1" helper="$2" generator=scripts/new-formula
+  local version="${1:?}" helper="${2:?}" generator=scripts/new-formula
   ruby "$helper" "$PWD" "$version"
   [[ ! -f Formula/src-lint.rb ]] || generator=scripts/update-formula
   "$generator" src-lint "$version"
@@ -108,7 +109,7 @@ validate_formula() {
 }
 
 commit_formula() {
-  local tag="$1" status=0
+  local tag="${1:?}" status=0
   git add Formula/src-lint.rb brews/src-lint.json README.md
   git diff --cached --quiet || status="$?"
   [[ "$status" != 0 ]] || return 0
@@ -119,13 +120,16 @@ commit_formula() {
 }
 
 open_pull_request() {
-  local branch="$1" tag="$2" existing body
+  local branch="${1:?}" tag="${2:?}" existing body
   existing="$(gh pr list --repo "$TAP_REPOSITORY" --head "yowainwright:$branch" \
     --state open --json url --jq '.[0].url // ""')"
-  if [[ -n "$existing" ]]; then
+  case "$existing" in
+  "") ;;
+  *)
     printf '%s\n' "$existing"
     return
-  fi
+    ;;
+  esac
   body="$release_dir/pr-body.md"
   printf 'Updates src-lint to %s from the verified release binaries.\n\nValidation: SHA256, provenance, brew audit, install, and test.\n' "$tag" >"$body"
   gh pr create --repo "$TAP_REPOSITORY" --base main --head "yowainwright:$branch" \
@@ -133,7 +137,8 @@ open_pull_request() {
 }
 
 run_homebrew_pr() {
-  local tap="$1" tag="$2" helper branch="src-lint-$2"
+  local tap="${1:?}" tag="${2:?}" helper
+  local branch="src-lint-$tag"
   helper="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/update-tap-package"
   cd "$tap"
   require_tap
@@ -153,9 +158,9 @@ main() {
   [[ "$#" -eq 3 ]] || fail 'usage: scripts/release.sh {verify-version <binary>|homebrew-pr <tap-dir>} <tag>'
   require_tag "$3"
   case "$1" in
-    verify-version) verify_version "$2" "$3" ;;
-    homebrew-pr) run_homebrew_pr "$2" "$3" ;;
-    *) fail 'unknown release command' ;;
+  verify-version) verify_version "$2" "$3" ;;
+  homebrew-pr) run_homebrew_pr "$2" "$3" ;;
+  *) fail 'unknown release command' ;;
   esac
 }
 

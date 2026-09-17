@@ -73,7 +73,7 @@ foreach(mode automatic disabled ci github_actions archive subproject unmanaged h
   set(repo "${WORK_ROOT}/${mode}")
   file(MAKE_DIRECTORY "${repo}")
   file(COPY "${REPO_ROOT}/CMakeLists.txt" "${REPO_ROOT}/src"
-    "${REPO_ROOT}/include" "${REPO_ROOT}/scripts" DESTINATION "${repo}")
+    "${REPO_ROOT}/include" "${REPO_ROOT}/scripts" "${REPO_ROOT}/cmake" DESTINATION "${repo}")
   set(git_dir "${repo}/.git")
   if(mode STREQUAL "automatic_separate")
     set(git_dir "${WORK_ROOT}/automatic-separate.git")

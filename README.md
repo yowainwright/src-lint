@@ -202,13 +202,20 @@ Use `src-lint --help` (or `-h`) for command syntax and `src-lint --version` for 
 
 ## Configuration
 
-Configured rules take precedence over defaults. Use one config file per directory. If a check finds two or more supported rc files in the same directory, it exits with configuration error `2`:
+Configured rules take precedence over defaults. Use one active config per directory; multiple active configs exit with configuration error `2`. Shared files without a src-lint section are ignored.
 
-| Filename | Format |
+All commands accept `--config <file>`, for example `src-lint check . --config .src-lintrc`. This selects the base policy instead of automatic ancestor discovery; child configs still override it. Boundary roots are relative to the selected file's directory. Custom filenames must end in `.json`, `.toml`, `.yaml`, or `.yml`; shared filenames below retain their enclosing keys. Missing or invalid selected configs exit with `2`.
+
+| Filename | Configuration |
 | --- | --- |
 | `.src-lintrc` or `.src-lintrc.json` | JSON |
 | `.src-lintrc.toml` | TOML |
 | `.src-lintrc.yaml` or `.src-lintrc.yml` | YAML |
+| `package.json` | JSON object at `"src-lint"` |
+| `pyproject.toml` | TOML tables under `[tool.src-lint]` |
+| `src-lint.yml` or `src-lint.yaml` | YAML block mapping under `src-lint:` |
+
+Shared files may contain unrelated settings. The selected section uses the same settings below; TOML inline tables and YAML anchors are not supported.
 
 Duplicate keys or sections within one document are errors; child configuration files can still override parent values. YAML fields must remain under their containing mapping. Unusable rc files, NUL bytes in configuration or source files, and import paths that exceed resolver capacity exit with `2`.
 
@@ -332,7 +339,7 @@ The [release workflow](.github/workflows/release.yml) publishes source and macOS
 <details>
 <summary>Maintainer setup and retries</summary>
 
-Tags use `vMAJOR.MINOR.PATCH`, must point to a commit on `main`, and must match the version in [CMakeLists.txt](CMakeLists.txt).
+Push a `vMAJOR.MINOR.PATCH` tag on `main` to release. The tag supplies the version; no version-file edit is needed. Local builds use `0.0.0` unless configured with `-DSRC_LINT_VERSION=MAJOR.MINOR.PATCH`. Published source archives retain their release version.
 
 Before Homebrew updates, merge the tap's inventory and CI setup. Set `HOMEBREW_TAP_TOKEN` to a fine-grained token limited to `yowainwright/homebrew-tap`, with Contents and Pull requests write access. Protect `main` and release tags, and require tap CI before merging formula PRs.
 

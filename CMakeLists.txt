@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(src_lint VERSION 0.1.0 LANGUAGES C)
+include(cmake/version.cmake)
+project(src_lint VERSION "${SRC_LINT_VERSION}" LANGUAGES C)
 
 if(NOT UNIX)
   message(FATAL_ERROR "The first import slice requires POSIX fts and realpath")
