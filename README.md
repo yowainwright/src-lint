@@ -1,5 +1,10 @@
 # src-lint
 
+[![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](./CMakeLists.txt)
+[![CI](https://github.com/yowainwright/src-lint/actions/workflows/ci.yml/badge.svg)](https://github.com/yowainwright/src-lint/actions/workflows/ci.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./.github/CONTRIBUTING.md)
+
 src-lint checks imports between services, packages, and components to catch access to private code.
 
 src-lint focuses on import boundaries, with the aim of staying fast and easy to use with coding agents.
@@ -150,6 +155,8 @@ The result contains a `findings` array. Each boundary violation includes `rule`,
 | Option | Meaning | Default |
 | --- | --- | --- |
 | `[path]` | Source file or directory to check | `.` |
+| `--root <dir>` | Scan directory and base for config boundary paths; relative `[path]` starts here | Unset |
+| `--config <file>` | Select a config file, relative to the working directory | Automatic discovery |
 | `--strict` | Treat unresolved local imports (`SL2001`) as errors | Off, unless enabled in config |
 | `--format text\|json` | Human-readable diagnostics or JSON | `text` |
 
@@ -204,7 +211,21 @@ Use `src-lint --help` (or `-h`) for command syntax and `src-lint --version` for 
 
 Configured rules take precedence over defaults. Use one active config per directory; multiple active configs exit with configuration error `2`. Shared files without a src-lint section are ignored.
 
-All commands accept `--config <file>`, for example `src-lint check . --config .src-lintrc`. This selects the base policy instead of automatic ancestor discovery; child configs still override it. Boundary roots are relative to the selected file's directory. Custom filenames must end in `.json`, `.toml`, `.yaml`, or `.yml`; shared filenames below retain their enclosing keys. Missing or invalid selected configs exit with `2`.
+All commands accept `--config <file>`, for example `src-lint check . --config .src-lintrc`. This selects the base policy instead of automatic ancestor discovery; child configs still override it. Without `--root`, boundary roots are relative to the selected file's directory. Custom filenames must end in `.json`, `.toml`, `.yaml`, or `.yml`; shared filenames below retain their enclosing keys. Missing or invalid selected configs exit with `2`.
+
+Use `--root <dir>` to apply a config to a different project directory:
+
+```sh
+src-lint check --config ./policy.json --root ../app
+src-lint check domains/orders --config ./policy.json --root ../app
+```
+
+The first command scans `../app`; the second scans `../app/domains/orders`.
+Config boundary paths and cache files are based in `../app`, and child configs
+within that root still override the selected policy. `--config` remains relative
+to the working directory. Without `--config`, discovery stops at `--root`.
+All three commands support `--root`; it must be an existing directory, and the
+scan path must stay inside it. Invalid roots or out-of-root scan paths exit with `2`.
 
 | Filename | Configuration |
 | --- | --- |
@@ -329,6 +350,8 @@ ctest --test-dir build-asan --output-on-failure
 ```
 
 [CI](.github/workflows/ci.yml) runs Release and sanitizer tests. [Performance tests](tests/integration/performance_test.c) check 10 ms startup and 50 ms warm one-file budgets on a 10,000-file repository. CI enforces those budgets on Ubuntu 24.04 x64; local Release tests include them too.
+
+`graph_scaling` reports median JSON graph runtimes for 1,000 and 10,000 files and their ratio. These measurements establish a baseline; they do not enforce a timing budget.
 
 </details>
 

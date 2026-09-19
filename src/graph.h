@@ -59,6 +59,8 @@ typedef struct {
   size_t boundary_capacity;
 } SlGraph;
 
+/* Add operations copy strings; callers retain their inputs on success and failure.
+ * The graph owns stored copies until sl_graph_free(). */
 bool sl_graph_add_node(SlGraph *graph, const char *id, const char *boundary);
 bool sl_graph_add_edge(SlGraph *graph, const SlGraphEdgeInput *input);
 bool sl_graph_add_boundary(SlGraph *graph, const char *name, const char *root, const char *source);

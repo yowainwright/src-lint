@@ -27,6 +27,8 @@ typedef struct {
   size_t capacity;
 } SlImportList;
 
+/* Copies specifier; callers retain it on success and failure.
+ * The list owns stored copies until sl_import_list_free(). */
 bool sl_import_list_add(SlImportList *list, const char *specifier, size_t line, size_t column,
                         SlLanguage language);
 void sl_import_list_free(SlImportList *list);

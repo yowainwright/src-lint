@@ -6,9 +6,10 @@
 
 static void print_usage(FILE *stream) {
   fputs("Usage:\n", stream);
-  fputs("  src-lint check [path] [--config file] [--strict] [--format text|json]\n", stream);
-  fputs("  src-lint discover [path] [--config file] [--format text|json]\n", stream);
-  fputs("  src-lint graph [path] [--config file] [--format json|html]\n", stream);
+  fputs("  src-lint check [path] [--root dir] [--config file] [--strict] [--format text|json]\n",
+        stream);
+  fputs("  src-lint discover [path] [--root dir] [--config file] [--format text|json]\n", stream);
+  fputs("  src-lint graph [path] [--root dir] [--config file] [--format json|html]\n", stream);
   fputs("  src-lint --version\n", stream);
 }
 
@@ -54,8 +55,13 @@ static bool format_supported(const SlRunOptions *options) {
 
 static bool set_option(const char *name, const char *value, SlRunOptions *options) {
   if (strcmp(name, "--format") == 0) return set_format(value, options);
-  if (strcmp(name, "--config") != 0 || options->config_path || !*value || *value == '-')
-    return false;
+  if (!*value || *value == '-') return false;
+  if (strcmp(name, "--root") == 0) {
+    if (options->config_root) return false;
+    options->config_root = value;
+    return true;
+  }
+  if (strcmp(name, "--config") != 0 || options->config_path) return false;
   options->config_path = value;
   return true;
 }

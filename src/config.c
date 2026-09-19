@@ -307,6 +307,7 @@ static char *parse_string(const char *value) {
   return copy;
 }
 
+/* Takes ownership of pattern on both success and failure. */
 static bool add_pattern(SlPatternList *patterns, char *pattern) {
   char **items = realloc(patterns->items, (patterns->count + 1) * sizeof(*items));
   if (!items) {
@@ -721,10 +722,35 @@ static char *decode_json_string(SlJsonParser *parser, char *value) {
   return value;
 }
 
+static bool json_skip_escape(SlJsonParser *parser) {
+  const char escape = *parser->cursor;
+  if (!escape) return false;
+  parser->cursor += 1;
+  if (escape != 'u') return strchr("\"\\/bfnrt", escape) != NULL;
+  uint32_t codepoint;
+  const char *cursor = parser->cursor;
+  if (!read_unicode_escape(&cursor, &codepoint)) return false;
+  parser->cursor = (char *)cursor;
+  return true;
+}
+
+static bool json_skip_string(SlJsonParser *parser) {
+  if (!json_take(parser, '"')) return false;
+  while (*parser->cursor && *parser->cursor != '"') {
+    const unsigned char character = (unsigned char)*parser->cursor++;
+    if (character < 0x20) return false;
+    if (character == '\\' && !json_skip_escape(parser)) return false;
+  }
+  return json_take(parser, '"');
+}
+
 static char *json_string(SlJsonParser *parser) {
   json_skip_space(parser);
-  if (*parser->cursor != '"') return NULL;
-  char *value = malloc(strlen(parser->cursor));
+  SlJsonParser measured = *parser;
+  if (!json_skip_string(&measured)) return NULL;
+  /* Encoded bytes bound the decoded size; replace the closing quote with NUL. */
+  const size_t capacity = (size_t)(measured.cursor - parser->cursor) - 1;
+  char *value = malloc(capacity);
   if (!value) return NULL;
   if (decode_json_string(parser, value)) return value;
   free(value);
@@ -940,28 +966,6 @@ static size_t json_line(const SlJsonParser *parser) {
     if (*cursor == '\n') line += 1;
   }
   return line;
-}
-
-static bool json_skip_escape(SlJsonParser *parser) {
-  const char escape = *parser->cursor;
-  if (!escape) return false;
-  parser->cursor += 1;
-  if (escape != 'u') return strchr("\"\\/bfnrt", escape) != NULL;
-  uint32_t codepoint;
-  const char *cursor = parser->cursor;
-  if (!read_unicode_escape(&cursor, &codepoint)) return false;
-  parser->cursor = (char *)cursor;
-  return true;
-}
-
-static bool json_skip_string(SlJsonParser *parser) {
-  if (!json_take(parser, '"')) return false;
-  while (*parser->cursor && *parser->cursor != '"') {
-    const unsigned char character = (unsigned char)*parser->cursor++;
-    if (character < 0x20) return false;
-    if (character == '\\' && !json_skip_escape(parser)) return false;
-  }
-  return json_take(parser, '"');
 }
 
 static bool json_digits(SlJsonParser *parser) {
@@ -1467,8 +1471,8 @@ static bool at_or_below(const char *path, const char *root) {
   return strcmp(path, root) == 0 || (strncmp(path, root, length) == 0 && path[length] == '/');
 }
 
-static bool collect_selected_configs(char *directory, const char *selected, SlPathList *paths,
-                                     FILE *errors) {
+static bool collect_selected_configs(char *directory, const char *selected, const char *config_root,
+                                     SlPathList *paths, FILE *errors) {
   char root[SL_PATH_CAPACITY];
   const SlConfigFile *file = sl_config_file_for_path(selected);
   const int status =
@@ -1477,31 +1481,36 @@ static bool collect_selected_configs(char *directory, const char *selected, SlPa
     fprintf(errors, "src-lint: cannot load selected configuration %s\n", selected);
     return false;
   }
-  while (at_or_below(directory, root) && strcmp(directory, root) != 0) {
+  const char *boundary = config_root ? config_root : root;
+  while (at_or_below(directory, boundary) && strcmp(directory, boundary) != 0) {
     if (!collect_directory_config(directory, paths, errors)) return false;
     if (!parent_directory(directory)) return false;
   }
   return path_list_add(paths, selected);
 }
 
-static bool collect_config_paths(const char *file_path, const char *selected, SlPathList *paths,
-                                 FILE *errors) {
+static bool collect_config_paths(const char *file_path, const char *selected,
+                                 const char *config_root, SlPathList *paths, FILE *errors) {
   char directory[SL_PATH_CAPACITY];
   if (!file_directory(file_path, directory)) return false;
-  if (selected) return collect_selected_configs(directory, selected, paths, errors);
+  if (selected) return collect_selected_configs(directory, selected, config_root, paths, errors);
+  if (config_root && !at_or_below(directory, config_root)) return true;
   char git_root[SL_PATH_CAPACITY];
-  const bool bounded = find_git_root(directory, git_root);
+  const bool bounded = !config_root && find_git_root(directory, git_root);
   do {
     if (!collect_directory_config(directory, paths, errors)) return false;
+    if (config_root && strcmp(directory, config_root) == 0) return true;
     if (bounded && strcmp(directory, git_root) == 0) return true;
   } while (parent_directory(directory));
   return true;
 }
 
-static bool set_repository_root(SlConfig *config, const char *config_path) {
+static bool set_repository_root(SlConfig *config, const char *config_path,
+                                const char *config_root) {
   char directory[SL_PATH_CAPACITY];
-  if (!file_directory(config_path, directory)) return false;
-  const char *policy_path = directory[0] == '/' ? directory + 1 : directory;
+  if (!config_root && !file_directory(config_path, directory)) return false;
+  const char *root = config_root ? config_root : directory;
+  const char *policy_path = root[0] == '/' ? root + 1 : root;
   if (strlen(policy_path) >= sizeof(config->repository_root)) return false;
   strcpy(config->repository_root, policy_path);
   return true;
@@ -1665,17 +1674,18 @@ static bool validate_config(const SlConfig *config, const char *file_path, FILE 
   return false;
 }
 
-bool sl_config_load_for_file(const char *file_path, const char *config_path, SlConfig *config,
-                             FILE *errors) {
+bool sl_config_load_for_file(const char *file_path, const char *config_path,
+                             const char *config_root, SlConfig *config, FILE *errors) {
   sl_config_init(config);
   SlPathList paths = {0};
-  const bool collected = collect_config_paths(file_path, config_path, &paths, errors);
+  const bool collected = collect_config_paths(file_path, config_path, config_root, &paths, errors);
   if (!collected) {
     path_list_free(&paths);
     return false;
   }
   const bool has_config = paths.count > 0;
-  const bool rooted = !has_config || set_repository_root(config, paths.items[paths.count - 1]);
+  const bool rooted =
+      !has_config || set_repository_root(config, paths.items[paths.count - 1], config_root);
   const bool applied = rooted && apply_config_paths(&paths, config, errors);
   const bool valid = applied && validate_config(config, file_path, errors);
   config->present = has_config;
@@ -1684,21 +1694,22 @@ bool sl_config_load_for_file(const char *file_path, const char *config_path, SlC
   return valid;
 }
 
-static bool collect_target_configs(const char *target, const char *selected, SlPathList *paths,
-                                   FILE *errors) {
+static bool collect_target_configs(const char *target, const char *selected,
+                                   const char *config_root, SlPathList *paths, FILE *errors) {
   struct stat information;
   const bool directory = stat(target, &information) == 0 && S_ISDIR(information.st_mode);
-  if (!directory) return collect_config_paths(target, selected, paths, errors);
+  if (!directory) return collect_config_paths(target, selected, config_root, paths, errors);
   char file_path[SL_PATH_CAPACITY];
   const int written = snprintf(file_path, sizeof(file_path), "%s/.", target);
   if (written < 0 || (size_t)written >= sizeof(file_path)) return false;
-  return collect_config_paths(file_path, selected, paths, errors);
+  return collect_config_paths(file_path, selected, config_root, paths, errors);
 }
 
-static bool apply_target_configs(const SlPathList *paths, const char *source, SlConfig *config,
-                                 FILE *errors) {
+static bool apply_target_configs(const SlPathList *paths, const char *source, const char *selected,
+                                 SlConfig *config, FILE *errors) {
   for (size_t index = paths->count; index > 0; index -= 1) {
     const char *path = paths->items[index - 1];
+    if (selected && strcmp(path, selected) == 0) continue;
     if (!at_or_below(path + 1, config->repository_root)) continue;
     char directory[SL_PATH_CAPACITY];
     if (!file_directory(path, directory)) return false;
@@ -1709,12 +1720,13 @@ static bool apply_target_configs(const SlPathList *paths, const char *source, Sl
 }
 
 bool sl_config_load_for_import(const char *source, const char *target, const char *config_path,
-                               SlConfig *config, FILE *errors) {
-  if (!sl_config_load_for_file(source, config_path, config, errors)) return false;
+                               const char *config_root, SlConfig *config, FILE *errors) {
+  if (!sl_config_load_for_file(source, config_path, config_root, config, errors)) return false;
   if (!config->present || !at_or_below(target + 1, config->repository_root)) return true;
   SlPathList paths = {0};
-  const bool collected = collect_target_configs(target, config_path, &paths, errors);
-  const bool applied = collected && apply_target_configs(&paths, source, config, errors);
+  const bool collected = collect_target_configs(target, config_path, config_root, &paths, errors);
+  const bool applied =
+      collected && apply_target_configs(&paths, source, config_path, config, errors);
   const bool valid = applied && validate_config(config, target, errors);
   path_list_free(&paths);
   if (!valid) sl_config_free(config);

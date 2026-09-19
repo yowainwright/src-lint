@@ -51,6 +51,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
   add_test(NAME performance_budgets COMMAND performance_test
     $<TARGET_FILE:src-lint> "${CMAKE_CURRENT_BINARY_DIR}/performance-work")
   set_tests_properties(performance_budgets PROPERTIES LABELS "integration;performance" RUN_SERIAL TRUE)
+  add_test(NAME graph_scaling COMMAND performance_test
+    $<TARGET_FILE:src-lint> "${CMAKE_CURRENT_BINARY_DIR}/graph-performance-work" --graph)
+  set_tests_properties(graph_scaling PROPERTIES LABELS "integration;performance" RUN_SERIAL TRUE TIMEOUT 180)
 endif()
 
 add_cli_test(service_boundary_violation service_boundary_violation
@@ -141,6 +144,8 @@ add_cli_test(extensionless_config extensionless_config
   "-DEXPECTED=${EXPECTED_ROOT}/config_child.json")
 add_cli_test(explicit_config explicit_config
   "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/explicit-config")
+add_cli_test(cli_root cli_root
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-root")
 foreach(name .src-lintrc .src-lintrc.json .src-lintrc.toml .src-lintrc.yaml .src-lintrc.yml)
   string(MAKE_C_IDENTIFIER "${name}" config_name)
   add_cli_test("config_without_sources_${config_name}" config_without_sources

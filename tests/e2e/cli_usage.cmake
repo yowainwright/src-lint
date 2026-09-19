@@ -12,6 +12,18 @@ foreach(command IN LISTS commands)
   endif()
 endforeach()
 
+string(FIND "${help_output}" "--root dir" root_position)
+if(root_position EQUAL -1)
+  message(FATAL_ERROR "Help is missing --root")
+endif()
+foreach(arguments "--root" "--root;--strict" "--root;.;--root;.")
+  execute_process(COMMAND "${CLI}" check ${arguments}
+    RESULT_VARIABLE result OUTPUT_QUIET ERROR_QUIET)
+  if(NOT result EQUAL 2)
+    message(FATAL_ERROR "Invalid root arguments accepted: ${arguments}")
+  endif()
+endforeach()
+
 string(FIND "${help_output}" "--config file" config_position)
 if(config_position EQUAL -1)
   message(FATAL_ERROR "Help is missing --config")
