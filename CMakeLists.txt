@@ -36,6 +36,7 @@ add_library(src_lint_core STATIC
   src/graph.c
   src/graph_html.c
   src/imports.c
+  src/imports_native.c
 )
 target_include_directories(src_lint_core PUBLIC include)
 target_compile_definitions(src_lint_core PRIVATE

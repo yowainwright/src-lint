@@ -213,6 +213,12 @@ static const char *language_name(SlLanguage language) {
   if (language == SL_LANGUAGE_PYTHON) return "python";
   if (language == SL_LANGUAGE_GO) return "go";
   if (language == SL_LANGUAGE_PROTO) return "proto";
+  if (language == SL_LANGUAGE_JULIA) return "julia";
+  if (language == SL_LANGUAGE_RUBY) return "ruby";
+  if (language == SL_LANGUAGE_SWIFT) return "swift";
+  if (language == SL_LANGUAGE_KOTLIN) return "kotlin";
+  if (language == SL_LANGUAGE_JAVA) return "java";
+  if (language == SL_LANGUAGE_TERRAFORM) return "terraform";
   return "javascript";
 }
 

@@ -47,21 +47,15 @@ static bool starts_with(const char *value, const char *prefix) {
 }
 
 static bool has_source_extension(const char *path) {
-  const char *extension = strrchr(path, '.');
-  if (!extension) return false;
-  return strcmp(extension, ".ts") == 0 || strcmp(extension, ".tsx") == 0 ||
-         strcmp(extension, ".mts") == 0 || strcmp(extension, ".cts") == 0 ||
-         strcmp(extension, ".js") == 0 || strcmp(extension, ".jsx") == 0 ||
-         strcmp(extension, ".mjs") == 0 || strcmp(extension, ".cjs") == 0 ||
-         strcmp(extension, ".py") == 0 || strcmp(extension, ".go") == 0 ||
-         strcmp(extension, ".proto") == 0;
+  return sl_source_language(path) != SL_LANGUAGE_COUNT;
 }
 
 static bool ignored_directory(const char *name) {
   return strcmp(name, ".git") == 0 || strcmp(name, "build") == 0 ||
-         strcmp(name, "node_modules") == 0 || strcmp(name, ".src-lint") == 0 ||
-         strcmp(name, "dist") == 0 || strcmp(name, ".next") == 0 || strcmp(name, "coverage") == 0 ||
-         strcmp(name, "out") == 0 || strcmp(name, ".turbo") == 0 || starts_with(name, "build-") ||
+         strcmp(name, ".terraform") == 0 || strcmp(name, "node_modules") == 0 ||
+         strcmp(name, ".src-lint") == 0 || strcmp(name, "dist") == 0 ||
+         strcmp(name, ".next") == 0 || strcmp(name, "coverage") == 0 || strcmp(name, "out") == 0 ||
+         strcmp(name, ".turbo") == 0 || starts_with(name, "build-") ||
          starts_with(name, "cmake-build-");
 }
 
@@ -354,11 +348,32 @@ static bool resolve_python_path(char *path, SlPathKind kind) {
   return true;
 }
 
+static bool resolve_jvm_path(char *path, SlLanguage language) {
+  char candidate[SL_PATH_CAPACITY];
+  strcpy(candidate, path);
+  do {
+    const bool kotlin = language == SL_LANGUAGE_KOTLIN && resolve_suffix(candidate, ".kt");
+    if (kotlin || resolve_suffix(candidate, ".java")) {
+      strcpy(path, candidate);
+      return true;
+    }
+    char *member = strrchr(candidate, '/');
+    if (!member) return false;
+    *member = '\0';
+  } while (repository_path_kind(candidate) == SL_PATH_MISSING);
+  return false;
+}
+
 static bool resolve_repository_path(char *path, SlLanguage language) {
   const SlPathKind kind = repository_path_kind(path);
+  if (language == SL_LANGUAGE_TERRAFORM) return kind == SL_PATH_DIRECTORY;
   if (kind == SL_PATH_FILE) return true;
   if (language == SL_LANGUAGE_JAVASCRIPT) return resolve_javascript_path(path, kind);
   if (language == SL_LANGUAGE_PYTHON) return resolve_python_path(path, kind);
+  if (language == SL_LANGUAGE_RUBY) return resolve_suffix(path, ".rb");
+  if (language == SL_LANGUAGE_JULIA && kind == SL_PATH_MISSING) return false;
+  const bool jvm = language == SL_LANGUAGE_JAVA || language == SL_LANGUAGE_KOTLIN;
+  if (jvm && kind == SL_PATH_MISSING) return resolve_jvm_path(path, language);
   return kind == SL_PATH_DIRECTORY;
 }
 
@@ -432,11 +447,48 @@ static bool resolve_configured_import(const SlConfig *config, const char *specif
   return normalize_path(joined, target);
 }
 
+static size_t module_prefix(const char *specifier, const char *name) {
+  size_t index = 0;
+  while (name[index]) {
+    const char character = name[index] == '.' ? '/' : name[index];
+    if (specifier[index] != character) return 0;
+    index += 1;
+  }
+  return specifier[index] == '\0' || specifier[index] == '/' ? index : 0;
+}
+
+static int resolve_named_import(const SlConfig *config, const SlImport *import, char *target) {
+  const bool named = import->language == SL_LANGUAGE_JULIA ||
+                     import->language == SL_LANGUAGE_SWIFT ||
+                     import->language == SL_LANGUAGE_JAVA || import->language == SL_LANGUAGE_KOTLIN;
+  if (!named || !config->present) return 0;
+  const SlBoundaryConfig *selected = NULL;
+  size_t longest = 0;
+  for (size_t index = 0; index < config->boundary_count; index += 1) {
+    const SlBoundaryConfig *boundary = &config->boundaries[index];
+    const size_t length = module_prefix(import->specifier, boundary->name);
+    if (length <= longest) continue;
+    selected = boundary;
+    longest = length;
+  }
+  if (!selected) return 0;
+  const int written = snprintf(target, SL_PATH_CAPACITY, "%s/%s%s", config->repository_root,
+                               selected->root, import->specifier + longest);
+  return written >= 0 && written < SL_PATH_CAPACITY ? 1 : -1;
+}
+
 /* 1: local target, 0: external import, -1: analysis failure. */
 static int resolve_import_target(const SlContext *context, const SlConfig *config,
                                  const char *source, const SlImport *import, char *target) {
+  const bool native_path = import->language == SL_LANGUAGE_JULIA ||
+                           import->language == SL_LANGUAGE_RUBY ||
+                           import->language == SL_LANGUAGE_TERRAFORM;
+  if (native_path && import->specifier[0] == '/')
+    return normalize_path(import->specifier, target) ? 1 : -1;
   if (import->specifier[0] == '.')
     return resolve_import(source, import->specifier, target) ? 1 : -1;
+  const int named = resolve_named_import(config, import, target);
+  if (named != 0) return named;
   const bool configured = config->present && specifier_boundary_root(config, import->specifier);
   if (configured) return resolve_configured_import(config, import->specifier, target) ? 1 : -1;
   const bool inferred =

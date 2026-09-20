@@ -125,7 +125,7 @@ static void hash_string(uint64_t *hash, const char *value) {
 static uint64_t cache_key(const SlCache *cache, const char *path, const char *content) {
   uint64_t hash = UINT64_C(1469598103934665603);
   const char *tool_version = "src-lint-" SRC_LINT_VERSION;
-  const char *parser_version = "lexical-adapters-v5";
+  const char *parser_version = "lexical-adapters-v6";
   const char *cache_version = "cache-v2";
   hash_string(&hash, tool_version);
   hash_string(&hash, parser_version);
@@ -133,6 +133,11 @@ static uint64_t cache_key(const SlCache *cache, const char *path, const char *co
   hash_bytes(&hash, &cache->config_hash, sizeof(cache->config_hash));
   hash_string(&hash, path);
   hash_string(&hash, content);
+  if (sl_source_language(path) == SL_LANGUAGE_RUBY) {
+    char directory[SL_PATH_CAPACITY];
+    const char *cwd = getcwd(directory, sizeof(directory));
+    hash_string(&hash, cwd ? cwd : "");
+  }
   return hash;
 }
 
@@ -275,7 +280,7 @@ static bool read_import_record(FILE *file, SlCacheImportRecord *record) {
   uintmax_t length;
   const bool read = read_number(file, &language, 10, ' ') && read_number(file, &line, 10, ' ') &&
                     read_number(file, &column, 10, ' ') && read_number(file, &length, 10, '\n');
-  if (!read || language > SL_LANGUAGE_PROTO || length >= SL_PATH_CAPACITY) return false;
+  if (!read || language >= SL_LANGUAGE_COUNT || length >= SL_PATH_CAPACITY) return false;
   if (line == 0 || line > SIZE_MAX || column == 0 || column > SIZE_MAX) return false;
   *record = (SlCacheImportRecord){(unsigned)language, (size_t)line, (size_t)column, (size_t)length};
   return true;

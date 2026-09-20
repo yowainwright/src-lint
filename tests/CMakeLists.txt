@@ -37,6 +37,9 @@ function(add_json_test name fixture expected)
     ${ARGN})
 endfunction()
 
+add_cli_test(native_languages native_languages
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/native-languages")
+
 add_executable(api_validation integration/api_validation.c)
 target_link_libraries(api_validation PRIVATE src_lint_core)
 target_compile_definitions(api_validation PRIVATE _POSIX_C_SOURCE=200809L)

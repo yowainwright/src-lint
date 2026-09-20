@@ -17,7 +17,10 @@ By default, each `services/<name>` directory is a boundary. Other services can i
 
 Importing private code reports `SL1001`. Unresolved local imports report `SL2001` as an advisory; `--strict` makes them errors.
 
-Supports TypeScript, JavaScript, Python, Go, and Proto so far. More languages are welcome and appreciated.
+Supports static imports in TypeScript, JavaScript, Python, Go, Proto, Julia, Ruby,
+Swift, Kotlin (including scripts), and Java, plus local Terraform module sources.
+The supported forms and resolution limits are listed below. More languages are
+welcome and appreciated.
 
 ### TypeScript and JavaScript
 
@@ -91,6 +94,72 @@ The `proto/` path makes this import allowed. See the [Proto fixture](tests/fixtu
 | Python | `from … import …` and `import …` |
 | Go | Single and grouped imports |
 | Proto | Regular, `public`, and `weak` imports |
+| Julia (`.jl`) | Literal `include("file.jl")`; absolute module names in `using` and `import`, including comma-separated modules and aliases |
+| Ruby (`.rb`) | Literal `require_relative` and `require` calls, with optional parentheses |
+| Swift (`.swift`) | Module imports, including attributed and declaration-specific imports |
+| Kotlin (`.kt`, `.kts`) | Qualified imports, aliases, and wildcard package imports |
+| Java (`.java`) | Qualified, static, and wildcard imports |
+| Terraform (`.tf`) | Literal local `source` paths in top-level `module` blocks |
+
+The additional adapters are lexical: they read source without running language
+runtimes, build tools, macros, or package managers. Imports inside conditional
+code are treated as potential dependencies. Computed paths and interpolated
+import strings are not analyzed. Quoted file paths support ordinary characters,
+escaped quotes, and escaped backslashes; other escape forms are not analyzed.
+
+Julia `include` and Ruby `require_relative` resolve from the importing file.
+Ruby `require` can resolve a configured boundary-root path (such as
+`require 'services/billing/api'`) or an absolute path, with `.rb` extension
+lookup. `require './x'` and `require '../x'` resolve from the CLI's working
+directory, which is included in Ruby cache keys. `--root` does not change that
+working directory. Ruby's runtime `$LOAD_PATH`, `load`, autoloading, and
+percent/heredoc import arguments are not analyzed.
+Julia relative module names such as `using .Billing` require module-scope
+knowledge and are not analyzed in this pass.
+
+For Julia, Swift, Java, and Kotlin, a boundary name can map a module or package
+prefix to its source directory:
+
+```json
+{
+  "boundaries": {
+    "com.example.billing": {
+      "root": "billing/src/main/java/com/example/billing",
+      "public": ["api/**"]
+    },
+    "Orders": { "root": "orders" }
+  }
+}
+```
+
+`import com.example.billing.api.Ledger` maps to that boundary's `api/Ledger`
+path. Java resolves `.java` files, including containing classes for static or
+nested-member imports. Kotlin tries `.kt` and `.java`; arbitrary filenames for
+top-level declarations are not indexed. Wildcards produce a package-directory
+edge, without expanding its members. Package declarations and build-system
+source sets are not indexed; use boundary names to map nonconventional layouts.
+Escaped identifiers, Java Unicode preprocessing, and Java module imports are
+not analyzed.
+
+Use a name such as `Billing` for a Julia or Swift module. Swift dependencies
+target the module root; a source boundary's `allow` list can permit that root
+(for example, `"allow": ["billing/**"]`). Names that match neither a configured
+boundary nor the existing service-path convention are treated as external.
+
+Terraform accepts `./`, `../`, and absolute local module paths. Remote registry,
+Git, and archive sources are external. Other attributes named `source` are not
+dependencies, and downloaded `.terraform` directories are excluded from scans.
+
+Language references: [Julia code loading](https://docs.julialang.org/en/v1/manual/code-loading/),
+[Ruby loading](https://ruby-doc.org/3.4.1/Kernel.html#method-i-require_relative),
+[Swift declarations](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/declarations/),
+[Kotlin imports](https://kotlinlang.org/docs/packages.html),
+[Java imports](https://docs.oracle.com/javase/specs/jls/se25/html/jls-7.html#jls-7.5),
+and [Terraform module sources](https://developer.hashicorp.com/terraform/language/block/module#source).
+
+Each new language should add extension registration, parser cases (including
+comments and strings), resolution tests, and end-to-end checks for `check`,
+`discover`, `graph`, and cached results before being listed as supported.
 
 </details>
 
