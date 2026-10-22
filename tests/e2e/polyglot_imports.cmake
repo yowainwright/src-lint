@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-function(run_native command expected)
+function(run_language command expected)
   execute_process(COMMAND "${CLI}" "${command}" orders --root "${root}"
     --config "${root}/policy.json" --format json ${ARGN}
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors TIMEOUT 10)
@@ -19,7 +19,7 @@ function(check_language extension language module private public missing target_
   file(WRITE "${root}/policy.json" "${policy}")
   file(WRITE "${root}/orders/main.${extension}" "${private}\n")
   foreach(command check discover graph)
-    run_native("${command}" 1)
+    run_language("${command}" 1)
     if(NOT command STREQUAL "discover" AND NOT last_output MATCHES "SL1001")
       message(FATAL_ERROR "${extension} ${command} did not enforce the boundary: ${last_output}")
     endif()
@@ -30,7 +30,7 @@ function(check_language extension language module private public missing target_
     message(FATAL_ERROR "${extension}: incorrect graph edge metadata: ${last_output}")
   endif()
   set(cold_graph "${last_output}")
-  run_native(graph 1)
+  run_language(graph 1)
   if(NOT last_output STREQUAL cold_graph)
     message(FATAL_ERROR "${extension}: warm graph changed")
   endif()
@@ -42,7 +42,7 @@ function(check_language extension language module private public missing target_
     file(WRITE "${root}/policy.json" "${policy}")
   endif()
   foreach(command check discover graph)
-    run_native("${command}" 0)
+    run_language("${command}" 0)
   endforeach()
   string(JSON status GET "${last_output}" edges 0 status)
   if(NOT status STREQUAL "allowed")
@@ -50,11 +50,11 @@ function(check_language extension language module private public missing target_
   endif()
 
   file(WRITE "${root}/orders/main.${extension}" "${missing}\n")
-  run_native(check 0)
+  run_language(check 0)
   if(NOT last_output MATCHES "SL2001")
     message(FATAL_ERROR "${extension}: missing target was not reported: ${last_output}")
   endif()
-  run_native(check 1 --strict)
+  run_language(check 1 --strict)
 endfunction()
 
 file(REMOVE_RECURSE "${WORK_ROOT}")
@@ -88,13 +88,13 @@ check_language(tf terraform billing
 set(extension jl)
 set(root "${WORK_ROOT}/jl")
 file(WRITE "${root}/orders/main.jl" "using Billing\n")
-run_native(check 1)
+run_language(check 1)
 
 # Ruby load-path imports can use the existing configured boundary-root matching.
 set(extension rb)
 set(root "${WORK_ROOT}/rb")
 file(WRITE "${root}/orders/main.rb" "require 'billing/internal/Ledger'\n")
-run_native(check 1)
+run_language(check 1)
 
 # Ruby require './x' follows the process working directory, including on warm runs.
 file(WRITE "${root}/orders/main.rb" "require './billing/api/Ledger'\n")
@@ -116,7 +116,7 @@ endforeach()
 set(extension java)
 set(root "${WORK_ROOT}/java")
 file(WRITE "${root}/orders/main.java" "import com.billing.api.*;\n")
-run_native(graph 0)
+run_language(graph 0)
 string(JSON target GET "${last_output}" edges 0 to)
 if(NOT target STREQUAL "billing/api")
   message(FATAL_ERROR "Wildcard target must be the package directory: ${last_output}")
@@ -129,7 +129,7 @@ file(WRITE "${root}/orders/main.tf" "module \"remote\" { source = \"vendor/modul
 file(MAKE_DIRECTORY "${root}/orders/.terraform/modules/fake")
 file(WRITE "${root}/orders/.terraform/modules/fake/main.tf"
   "module \"fake\" { source = \"../../../../billing/internal\" }\n")
-run_native(graph 0)
+run_language(graph 0)
 string(JSON count LENGTH "${last_output}" edges)
 if(NOT count EQUAL 0)
   message(FATAL_ERROR "Remote or installed modules produced local edges: ${last_output}")

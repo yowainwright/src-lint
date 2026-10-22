@@ -17,7 +17,7 @@ if(SRC_LINT_SANITIZERS)
   target_compile_options(resilience_test PRIVATE ${SANITIZER_FLAGS})
 endif()
 add_test(NAME resilience COMMAND resilience_test)
-set_tests_properties(resilience PROPERTIES LABELS e2e TIMEOUT 15)
+set_tests_properties(resilience PROPERTIES LABELS integration TIMEOUT 15)
 
 function(add_cli_test name script)
   add_test(NAME "${name}" COMMAND "${CMAKE_COMMAND}"
@@ -37,14 +37,14 @@ function(add_json_test name fixture expected)
     ${ARGN})
 endfunction()
 
-add_cli_test(native_languages native_languages
-  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/native-languages")
+add_cli_test(polyglot_imports polyglot_imports
+  "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/polyglot-imports")
 
-add_executable(api_validation integration/api_validation.c)
-target_link_libraries(api_validation PRIVATE src_lint_core)
-target_compile_definitions(api_validation PRIVATE _POSIX_C_SOURCE=200809L)
-target_compile_options(api_validation PRIVATE -Wall -Wextra -Wpedantic -Werror)
-add_test(NAME api_validation COMMAND api_validation "${FIXTURE_ROOT}")
+add_executable(api_validation_test integration/api_validation_test.c)
+target_link_libraries(api_validation_test PRIVATE src_lint_core)
+target_compile_definitions(api_validation_test PRIVATE _POSIX_C_SOURCE=200809L)
+target_compile_options(api_validation_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_test(NAME api_validation COMMAND api_validation_test "${FIXTURE_ROOT}")
 set_tests_properties(api_validation PROPERTIES LABELS integration)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -151,6 +151,7 @@ add_cli_test(cli_root cli_root
   "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cli-root")
 foreach(name .src-lintrc .src-lintrc.json .src-lintrc.toml .src-lintrc.yaml .src-lintrc.yml)
   string(MAKE_C_IDENTIFIER "${name}" config_name)
+  string(REGEX REPLACE "^_+" "" config_name "${config_name}")
   add_cli_test("config_without_sources_${config_name}" config_without_sources
     "-DCONFIG_NAME=${name}"
     "-DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/empty-${config_name}")
@@ -273,9 +274,11 @@ foreach(condition missing_token dirty_tap diff_error draft prerelease wrong_vers
   add_release_test("failure_${condition}" precondition_failure "${condition}")
 endforeach()
 foreach(target darwin-arm64 darwin-amd64 linux-arm64 linux-amd64)
-  add_release_test("missing_${target}" missing_asset "${target}")
+  string(REPLACE "-" "_" name "${target}")
+  add_release_test("missing_${name}" missing_asset "${target}")
 endforeach()
 foreach(tag 0.1.0 v01.1.0 v1.2 v1.2.3-rc1 v1.2.3/branch)
   string(MAKE_C_IDENTIFIER "${tag}" name)
+  string(REGEX REPLACE "^_+" "" name "${name}")
   add_release_test("invalid_tag_${name}" invalid_tag "${tag}")
 endforeach()

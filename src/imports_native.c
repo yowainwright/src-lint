@@ -120,13 +120,15 @@ static bool interpolated(const SlNativeScanner *scanner) {
   return begins(scanner->cursor, "${") || begins(scanner->cursor, "%{");
 }
 
-static void skip_quoted_content(SlNativeScanner *scanner, char quote) {
+static bool skip_quoted_content(SlNativeScanner *scanner, char quote) {
   advance(scanner);
   while (*scanner->cursor && *scanner->cursor != quote) {
     if (*scanner->cursor == '\\') advance(scanner);
     advance(scanner);
   }
-  if (*scanner->cursor) advance(scanner);
+  if (!*scanner->cursor) return false;
+  advance(scanner);
+  return true;
 }
 
 static void skip_interpolation_body(SlNativeScanner *scanner, char open, char close) {
@@ -248,11 +250,20 @@ static bool skip_ruby_percent(SlNativeScanner *scanner) {
   return true;
 }
 
-static bool ruby_regex(const SlNativeScanner *scanner) {
-  if (scanner->language != SL_LANGUAGE_RUBY || *scanner->cursor != '/') return false;
+static bool ruby_literal_prefix(const SlNativeScanner *scanner) {
   const char *before = scanner->cursor;
   while (before > scanner->start && (before[-1] == ' ' || before[-1] == '\t')) before -= 1;
-  return before == scanner->start || strchr("\n=([{,:;!~", before[-1]) != NULL;
+  if (before == scanner->start || strchr("\n=([{,:;!~", before[-1])) return true;
+  const bool argument = before < scanner->cursor && !isspace((unsigned char)scanner->cursor[1]);
+  if (!argument) return false;
+  const char *end = before;
+  while (before > scanner->start && word_part(before[-1])) before -= 1;
+  return before < end && (islower((unsigned char)*before) || *before == '_');
+}
+
+static bool ruby_regex(const SlNativeScanner *scanner) {
+  const bool supported = scanner->language == SL_LANGUAGE_RUBY && *scanner->cursor == '/';
+  return supported && ruby_literal_prefix(scanner);
 }
 
 static bool julia_adjoint(const SlNativeScanner *scanner) {
@@ -268,39 +279,62 @@ static bool heredoc_end(const char *line, const char *label, size_t length) {
   return next == '\0' || next == '\r' || next == '\n';
 }
 
-static void skip_heredoc_body(SlNativeScanner *scanner, const char *label, size_t length) {
-  skip_line(scanner);
-  while (*scanner->cursor) {
-    advance(scanner);
-    while (*scanner->cursor == ' ' || *scanner->cursor == '\t') advance(scanner);
-    if (heredoc_end(scanner->cursor, label, length)) break;
-    skip_line(scanner);
+static bool skip_heredoc_body(SlNativeScanner *scanner, const char *label, size_t length,
+                              bool indented) {
+  SlNativeScanner body = *scanner;
+  skip_line(&body);
+  while (*body.cursor) {
+    advance(&body);
+    if (indented) {
+      while (*body.cursor == ' ' || *body.cursor == '\t') advance(&body);
+    }
+    if (heredoc_end(body.cursor, label, length)) {
+      skip_line(&body);
+      *scanner = body;
+      return true;
+    }
+    skip_line(&body);
   }
-  skip_line(scanner);
+  return false;
+}
+
+static size_t heredoc_label_length(const char *label, char quote) {
+  const char *end = label;
+  if (!quote) {
+    const bool identifier = word_part(*label) && !isdigit((unsigned char)*label) && *label != '$';
+    if (!identifier) return 0;
+    while (word_part(*end)) end += 1;
+    return (size_t)(end - label);
+  }
+  while (*end && *end != quote && *end != '\r' && *end != '\n') end += 1;
+  if (*end != quote) return 0;
+  return (size_t)(end - label);
 }
 
 static bool skip_heredoc(SlNativeScanner *scanner) {
-  const bool supported =
-      scanner->language == SL_LANGUAGE_RUBY || scanner->language == SL_LANGUAGE_TERRAFORM;
+  const bool ruby = scanner->language == SL_LANGUAGE_RUBY && ruby_literal_prefix(scanner);
+  const bool supported = ruby || scanner->language == SL_LANGUAGE_TERRAFORM;
   if (!supported || !begins(scanner->cursor, "<<")) return false;
   const char *label = scanner->cursor + 2;
-  if (*label == '-' || *label == '~') label += 1;
-  if (*label == '\'' || *label == '"') label += 1;
-  const char *end = label;
-  while (word_part(*end)) end += 1;
-  if (end == label) return false;
-  skip_heredoc_body(scanner, label, (size_t)(end - label));
-  return true;
+  const bool modifier = *label == '-' || *label == '~';
+  const bool indented = modifier || scanner->language == SL_LANGUAGE_TERRAFORM;
+  if (modifier) label += 1;
+  const bool quoted = *label == '\'' || *label == '"' || *label == '`';
+  const char quote = quoted ? *label : '\0';
+  if (quoted) label += 1;
+  const size_t length = heredoc_label_length(label, quote);
+  if (!length) return false;
+  return skip_heredoc_body(scanner, label, length, indented);
 }
 
 static bool skip_special_string(SlNativeScanner *scanner) {
   if (skip_heredoc(scanner) || skip_swift_raw_string(scanner) || skip_ruby_percent(scanner))
     return true;
-  if (ruby_regex(scanner)) {
-    skip_quoted_content(scanner, '/');
-    return true;
-  }
-  return false;
+  if (!ruby_regex(scanner)) return false;
+  SlNativeScanner regex = *scanner;
+  if (!skip_quoted_content(&regex, '/')) return false;
+  *scanner = regex;
+  return true;
 }
 
 static void read_token(SlNativeScanner *scanner, SlNativeToken *token) {

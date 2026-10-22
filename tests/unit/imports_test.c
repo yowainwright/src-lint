@@ -86,6 +86,37 @@ static const ImportCase cases[] = {
      SL_LANGUAGE_RUBY,
      {{"services/billing/api", 1, 10}},
      1},
+    {"Ruby shifts before imports",
+     "main.rb",
+     "bits = 1<<2\nbits = 1 <<WIDTH\nbits = WIDTH<<2\n"
+     "items = []; items <<value\nrequire_relative 'good'\nWIDTH\n",
+     SL_LANGUAGE_RUBY,
+     {{"./good", 5, 19}},
+     1},
+    {"Ruby quoted heredoc markers",
+     "main.rb",
+     "text = <<'END-TEXT'\nrequire_relative 'bad'\nEND-TEXT\n"
+     "text = <<\"END TEXT\"\nrequire_relative 'bad'\nEND TEXT\n"
+     "text = <<`END-TEXT`\nrequire_relative 'bad'\nEND-TEXT\nrequire_relative 'good'\n",
+     SL_LANGUAGE_RUBY,
+     {{"./good", 10, 19}},
+     1},
+    {"Ruby heredoc indentation",
+     "main.rb",
+     "text = <<TEXT\n  TEXT\nrequire_relative 'bad'\nTEXT\nrequire_relative 'good'\n"
+     "text = <<-TEXT\nrequire_relative 'bad'\n  TEXT\n"
+     "text = <<~TEXT\nrequire_relative 'bad'\n  TEXT\nrequire_relative 'other'\n",
+     SL_LANGUAGE_RUBY,
+     {{"./good", 5, 19}, {"./other", 12, 19}},
+     2},
+    {"Ruby regex arguments and division",
+     "main.rb",
+     "puts /start\nrequire_relative \"fake\"\n/\n"
+     "value = 8 / 2\nvalue = 8/2\nvalue = 8 /2\nvalue /divisor\n"
+     "require_relative 'good'\n",
+     SL_LANGUAGE_RUBY,
+     {{"./good", 8, 19}},
+     1},
     {"Ruby ignored text",
      "main.rb",
      "# require_relative 'bad'\n=begin\nrequire_relative 'bad'\n=end\n"
@@ -413,7 +444,7 @@ static void empty_sources(void) {
   }
 }
 
-static void truncated_native_case(const ImportCase *test) {
+static void truncated_language_case(const ImportCase *test) {
   if (test->language < SL_LANGUAGE_JULIA) return;
   const size_t size = strlen(test->source);
   for (size_t length = 0; length < size; length += 1) {
@@ -426,8 +457,8 @@ static void truncated_native_case(const ImportCase *test) {
   }
 }
 
-static void truncated_native_sources(void) {
-  for (size_t index = 0; index < COUNT(cases); index += 1) truncated_native_case(&cases[index]);
+static void truncated_language_sources(void) {
+  for (size_t index = 0; index < COUNT(cases); index += 1) truncated_language_case(&cases[index]);
 }
 
 static void unsupported_extensions(void) {
@@ -480,7 +511,7 @@ int main(void) {
   for (size_t index = 0; index < COUNT(cases); index += 1) check_case(&cases[index]);
   rejects_invalid_escapes();
   empty_sources();
-  truncated_native_sources();
+  truncated_language_sources();
   unsupported_extensions();
   deeply_nested_templates();
   list_owns_specifiers_after_growth();
