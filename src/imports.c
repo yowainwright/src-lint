@@ -1012,14 +1012,33 @@ static bool parse_proto(char *content, SlImportList *list) {
   return parsed;
 }
 
-static bool path_has_extension(const char *path, const char *extension) {
-  const char *actual = strrchr(path, '.');
-  return actual && strcmp(actual, extension) == 0;
+SlLanguage sl_source_language(const char *path) {
+  static const struct {
+    const char *extension;
+    SlLanguage language;
+  } types[] = {{".ts", SL_LANGUAGE_JAVASCRIPT},  {".tsx", SL_LANGUAGE_JAVASCRIPT},
+               {".mts", SL_LANGUAGE_JAVASCRIPT}, {".cts", SL_LANGUAGE_JAVASCRIPT},
+               {".js", SL_LANGUAGE_JAVASCRIPT},  {".jsx", SL_LANGUAGE_JAVASCRIPT},
+               {".mjs", SL_LANGUAGE_JAVASCRIPT}, {".cjs", SL_LANGUAGE_JAVASCRIPT},
+               {".py", SL_LANGUAGE_PYTHON},      {".go", SL_LANGUAGE_GO},
+               {".proto", SL_LANGUAGE_PROTO},    {".jl", SL_LANGUAGE_JULIA},
+               {".rb", SL_LANGUAGE_RUBY},        {".swift", SL_LANGUAGE_SWIFT},
+               {".kt", SL_LANGUAGE_KOTLIN},      {".kts", SL_LANGUAGE_KOTLIN},
+               {".java", SL_LANGUAGE_JAVA},      {".tf", SL_LANGUAGE_TERRAFORM}};
+  const char *extension = strrchr(path, '.');
+  if (!extension) return SL_LANGUAGE_COUNT;
+  for (size_t index = 0; index < sizeof(types) / sizeof(*types); index += 1) {
+    if (strcmp(extension, types[index].extension) == 0) return types[index].language;
+  }
+  return SL_LANGUAGE_COUNT;
 }
 
 bool sl_parse_imports(const char *path, char *content, SlImportList *list) {
-  if (path_has_extension(path, ".py")) return parse_python(content, list);
-  if (path_has_extension(path, ".go")) return parse_go(content, list);
-  if (path_has_extension(path, ".proto")) return parse_proto(content, list);
-  return parse_javascript(content, list);
+  const SlLanguage language = sl_source_language(path);
+  if (language == SL_LANGUAGE_PYTHON) return parse_python(content, list);
+  if (language == SL_LANGUAGE_GO) return parse_go(content, list);
+  if (language == SL_LANGUAGE_PROTO) return parse_proto(content, list);
+  if (language == SL_LANGUAGE_JAVASCRIPT) return parse_javascript(content, list);
+  if (language == SL_LANGUAGE_COUNT) return true;
+  return sl_parse_native_imports(content, language, list);
 }

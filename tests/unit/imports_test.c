@@ -17,6 +17,229 @@ typedef struct {
 } ImportCase;
 
 static const ImportCase cases[] = {
+    {"Julia aliases",
+     "main.jl",
+     "import Billing as B, Orders",
+     SL_LANGUAGE_JULIA,
+     {{"Billing", 1, 8}, {"Orders", 1, 22}},
+     2},
+    {"Kotlin raw backslash",
+     "main.kt",
+     "val text = \"\"\"\\\"\"\"\nimport Real\n",
+     SL_LANGUAGE_KOTLIN,
+     {{"Real", 2, 8}},
+     1},
+    {"Julia adjoint before include",
+     "main.jl",
+     "x = matrix'\ninclude(\"helper.jl\")",
+     SL_LANGUAGE_JULIA,
+     {{"./helper.jl", 2, 10}},
+     1},
+    {"Ruby percent and regex text",
+     "main.rb",
+     "x = %q{require_relative 'bad'}\ny = /require_relative 'bad'/\n"
+     "z = \"#{f(\"require_relative 'bad'\")}\"\nrequire_relative 'good'\n",
+     SL_LANGUAGE_RUBY,
+     {{"./good", 4, 19}},
+     1},
+    {"Swift raw and interpolated strings",
+     "main.swift",
+     "let x = #\"embedded \" import Fake \"\"#\n"
+     "let y = \"\\(f(\"import Fake\"))\"\nimport Real\n",
+     SL_LANGUAGE_SWIFT,
+     {{"Real", 3, 8}},
+     1},
+    {"Julia include",
+     "main.jl",
+     "include(\"../billing/private.jl\")\n",
+     SL_LANGUAGE_JULIA,
+     {{"../billing/private.jl", 1, 10}},
+     1},
+    {"Julia local include",
+     "main.jl",
+     "include(\"helper.jl\")",
+     SL_LANGUAGE_JULIA,
+     {{"./helper.jl", 1, 10}},
+     1},
+    {"Julia module imports",
+     "main.jl",
+     "using Billing, Orders\nimport Billing.API: f, g\n",
+     SL_LANGUAGE_JULIA,
+     {{"Billing", 1, 7}, {"Orders", 1, 16}, {"Billing/API", 2, 8}},
+     3},
+    {"Julia mixed relative and absolute imports",
+     "main.jl",
+     "using .Utils, Billing\nusing A, .Utils, Billing\n",
+     SL_LANGUAGE_JULIA,
+     {{"Billing", 1, 15}, {"A", 2, 7}, {"Billing", 2, 18}},
+     3},
+    {"Julia relative aliases and selected names",
+     "main.jl",
+     "import ..Utils.Sub as U, Billing.API\nusing .Utils: Billing, Orders\nusing .Utils, .Other\n",
+     SL_LANGUAGE_JULIA,
+     {{"Billing/API", 1, 26}},
+     1},
+    {"Julia ignored text",
+     "main.jl",
+     "# include(\"bad.jl\")\n#= outer #= nested =# include(\"bad.jl\") =#\n"
+     "text = \"\"\"\nimport Fake\n\"\"\"\ninclude(\"$name.jl\")\ninclude(\"a\" * suffix)\n",
+     SL_LANGUAGE_JULIA,
+     {{0}},
+     0},
+    {"Ruby require_relative",
+     "main.rb",
+     "require_relative 'helper'\n",
+     SL_LANGUAGE_RUBY,
+     {{"./helper", 1, 19}},
+     1},
+    {"Ruby require",
+     "main.rb",
+     "require('services/billing/api')\n",
+     SL_LANGUAGE_RUBY,
+     {{"services/billing/api", 1, 10}},
+     1},
+    {"Ruby call terminators",
+     "main.rb",
+     "task { require_relative '../billing/private' }\nrequire 'billing/private' or abort\n"
+     "require 'billing/api' and ready\nif ready then require_relative 'helper' end\n",
+     SL_LANGUAGE_RUBY,
+     {{"../billing/private", 1, 26},
+      {"billing/private", 2, 10},
+      {"billing/api", 3, 10},
+      {"./helper", 4, 33}},
+     4},
+    {"Ruby computed call arguments",
+     "main.rb",
+     "require 'bad' + suffix\nrequire 'bad' && path\nrequire 'bad' 'suffix'\n",
+     SL_LANGUAGE_RUBY,
+     {{0}},
+     0},
+    {"Ruby multiple heredocs",
+     "main.rb",
+     "puts <<A, <<B\nrequire_relative 'fake_a'\nA\nrequire_relative 'fake_b'\nB\n"
+     "require_relative 'good'\n",
+     SL_LANGUAGE_RUBY,
+     {{"./good", 6, 19}},
+     1},
+    {"Ruby heredoc declaration code",
+     "main.rb",
+     "puts <<'A-TEXT', <<~\"B TEXT\"; require_relative 'header'\n"
+     "require_relative 'fake_a'\nA-TEXT\nrequire_relative 'fake_b'\n  B TEXT\n"
+     "require_relative 'tail'\n",
+     SL_LANGUAGE_RUBY,
+     {{"./header", 1, 49}, {"./tail", 6, 19}},
+     2},
+    {"Ruby shifts before imports",
+     "main.rb",
+     "bits = 1<<2\nbits = 1 <<WIDTH\nbits = WIDTH<<2\n"
+     "items = []; items <<value\nrequire_relative 'good'\nWIDTH\n",
+     SL_LANGUAGE_RUBY,
+     {{"./good", 5, 19}},
+     1},
+    {"Ruby quoted heredoc markers",
+     "main.rb",
+     "text = <<'END-TEXT'\nrequire_relative 'bad'\nEND-TEXT\n"
+     "text = <<\"END TEXT\"\nrequire_relative 'bad'\nEND TEXT\n"
+     "text = <<`END-TEXT`\nrequire_relative 'bad'\nEND-TEXT\nrequire_relative 'good'\n",
+     SL_LANGUAGE_RUBY,
+     {{"./good", 10, 19}},
+     1},
+    {"Ruby heredoc indentation",
+     "main.rb",
+     "text = <<TEXT\n  TEXT\nrequire_relative 'bad'\nTEXT\nrequire_relative 'good'\n"
+     "text = <<-TEXT\nrequire_relative 'bad'\n  TEXT\n"
+     "text = <<~TEXT\nrequire_relative 'bad'\n  TEXT\nrequire_relative 'other'\n",
+     SL_LANGUAGE_RUBY,
+     {{"./good", 5, 19}, {"./other", 12, 19}},
+     2},
+    {"Ruby regex arguments and division",
+     "main.rb",
+     "puts /start\nrequire_relative \"fake\"\n/\n"
+     "value = 8 / 2\nvalue = 8/2\nvalue = 8 /2\nvalue /divisor\n"
+     "require_relative 'good'\n",
+     SL_LANGUAGE_RUBY,
+     {{"./good", 8, 19}},
+     1},
+    {"Ruby ignored text",
+     "main.rb",
+     "# require_relative 'bad'\n=begin\nrequire_relative 'bad'\n=end\n"
+     "text = <<~TEXT\nrequire_relative 'bad'\nTEXT\n"
+     "require_relative \"#{name}\"\nrequire_relative('a' + name)\n"
+     "object.require_relative 'bad'\n__END__\nrequire_relative 'bad'\n",
+     SL_LANGUAGE_RUBY,
+     {{0}},
+     0},
+    {"Swift imports",
+     "main.swift",
+     "import Billing\n@testable import struct Orders.Item\n",
+     SL_LANGUAGE_SWIFT,
+     {{"Billing", 1, 8}, {"Orders", 2, 25}},
+     2},
+    {"Swift ignored text",
+     "main.swift",
+     "/* outer /* nested */ import Fake */\nlet text = \"\"\"\nimport Fake\n\"\"\"\n",
+     SL_LANGUAGE_SWIFT,
+     {{0}},
+     0},
+    {"Kotlin alias and wildcard",
+     "main.kt",
+     "import com.billing.Ledger as Book\nimport com.orders.*\n",
+     SL_LANGUAGE_KOTLIN,
+     {{"com/billing/Ledger", 1, 8}, {"com/orders", 2, 8}},
+     2},
+    {"Kotlin script",
+     "main.kts",
+     "import com.billing.Ledger\n",
+     SL_LANGUAGE_KOTLIN,
+     {{"com/billing/Ledger", 1, 8}},
+     1},
+    {"Kotlin ignored text",
+     "main.kt",
+     "/* outer /* nested */ import Fake */\nval text = \"\"\"\nimport Fake\n\"\"\"\n",
+     SL_LANGUAGE_KOTLIN,
+     {{0}},
+     0},
+    {"Java static and wildcard",
+     "Main.java",
+     "package com.orders; import static com.billing.Ledger.write;\nimport com.billing.*;\n",
+     SL_LANGUAGE_JAVA,
+     {{"com/billing/Ledger/write", 1, 35}, {"com/billing", 2, 8}},
+     2},
+    {"Java multiline import",
+     "Main.java",
+     "import /* comment */ com.billing.\n Ledger;",
+     SL_LANGUAGE_JAVA,
+     {{"com/billing/Ledger", 1, 22}},
+     1},
+    {"Java ignored text",
+     "Main.java",
+     "// import Fake;\n/* import Fake; */ String text = \"\"\"\nimport Fake;\n\"\"\";\n",
+     SL_LANGUAGE_JAVA,
+     {{0}},
+     0},
+    {"Terraform local module",
+     "main.tf",
+     "module \"billing\" { source = \"../billing\" }",
+     SL_LANGUAGE_TERRAFORM,
+     {{"../billing", 1, 30}},
+     1},
+    {"Terraform multiline module",
+     "main.tf",
+     "module \"billing\" {\n source =\n \"../billing\"\n}",
+     SL_LANGUAGE_TERRAFORM,
+     {{"../billing", 3, 3}},
+     1},
+    {"Terraform ignored sources",
+     "main.tf",
+     "# module \"fake\" { source = \"../bad\" }\n"
+     "locals { source = \"../bad\" }\nresource \"x\" \"y\" { source = \"../bad\" }\n"
+     "module \"remote\" { source = \"git::https://host/services/bad\" }\n"
+     "module \"computed\" { source = \"../${var.name}\" }\n"
+     "module \"nested\" { other = { source = \"../bad\" } }\n"
+     "locals { text = <<EOT\nmodule \"fake\" { source = \"../bad\" }\nEOT\n}\n",
+     SL_LANGUAGE_TERRAFORM,
+     {{0}},
+     0},
     {"import in template expression",
      "module.js",
      "`${require('./api')}`;",
@@ -252,7 +475,9 @@ static void rejects_invalid_escapes(void) {
 }
 
 static void empty_sources(void) {
-  const char *paths[] = {"module.js", "module.py", "module.go", "module.proto"};
+  const char *paths[] = {"module.js",  "module.py",   "module.go",    "module.proto",
+                         "module.jl",  "module.rb",   "module.swift", "module.kt",
+                         "module.kts", "module.java", "module.tf",    "module.txt"};
   for (size_t index = 0; index < COUNT(paths); index += 1) {
     char content[] = "";
     SlImportList imports = {0};
@@ -260,6 +485,32 @@ static void empty_sources(void) {
     CHECK(imports.count == 0);
     sl_import_list_free(&imports);
   }
+}
+
+static void truncated_language_case(const ImportCase *test) {
+  if (test->language < SL_LANGUAGE_JULIA) return;
+  const size_t size = strlen(test->source);
+  for (size_t length = 0; length < size; length += 1) {
+    char *content = strndup(test->source, length);
+    CHECK(content != NULL);
+    SlImportList imports = {0};
+    (void)sl_parse_imports(test->path, content, &imports);
+    sl_import_list_free(&imports);
+    free(content);
+  }
+}
+
+static void truncated_language_sources(void) {
+  for (size_t index = 0; index < COUNT(cases); index += 1) truncated_language_case(&cases[index]);
+}
+
+static void unsupported_extensions(void) {
+  char content[] = "import './not-a-source-file';";
+  SlImportList imports = {0};
+  CHECK(sl_source_language("notes.txt") == SL_LANGUAGE_COUNT);
+  CHECK(sl_parse_imports("notes.txt", content, &imports));
+  CHECK(imports.count == 0);
+  sl_import_list_free(&imports);
 }
 
 static void deeply_nested_templates(void) {
@@ -303,6 +554,8 @@ int main(void) {
   for (size_t index = 0; index < COUNT(cases); index += 1) check_case(&cases[index]);
   rejects_invalid_escapes();
   empty_sources();
+  truncated_language_sources();
+  unsupported_extensions();
   deeply_nested_templates();
   list_owns_specifiers_after_growth();
   return 0;

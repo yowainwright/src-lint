@@ -4,12 +4,14 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
 #define FIXTURE_FILES 10000
+#define SMALL_GRAPH_FILES 1000
 #define WARMUP_RUNS 3
 #define TIMING_RUNS 31
 #define PATH_CAPACITY 4096
@@ -47,8 +49,8 @@ static bool create_bulk_file(const char *root, size_t index) {
   return write_file(path, "export {};\n");
 }
 
-static bool create_bulk_files(const char *root) {
-  for (size_t index = 0; index < FIXTURE_FILES; index += 1) {
+static bool create_bulk_files(const char *root, size_t count) {
+  for (size_t index = 0; index < count; index += 1) {
     if (!create_bulk_file(root, index)) return false;
   }
   return true;
@@ -62,13 +64,13 @@ static bool create_checked_files(const char *root) {
   return write_file(source, "import \"./local.ts\";\n") && write_file(target, "export {};\n");
 }
 
-static bool fixture_ready(const char *root) {
+static bool fixture_ready(const char *root, size_t count) {
   char marker[PATH_CAPACITY];
   if (!join_path(marker, root, ".ready")) return false;
   struct stat information;
   if (stat(marker, &information) == 0) return true;
-  if (!make_fixture_directories(root) || !create_bulk_files(root)) return false;
-  return create_checked_files(root) && write_file(marker, "10000\n");
+  if (!make_fixture_directories(root) || !create_bulk_files(root, count)) return false;
+  return create_checked_files(root) && write_file(marker, "ready\n");
 }
 
 static int run_process(const char *cli, char *const arguments[]) {
@@ -125,18 +127,50 @@ static double median_runtime(const char *cli, char *const arguments[], const cha
   return samples[TIMING_RUNS / 2];
 }
 
-int main(int argc, char **argv) {
-  if (argc != 3 || !fixture_ready(argv[2])) return 2;
+static double graph_runtime(const char *cli, const char *root, size_t count) {
+  char fixture[PATH_CAPACITY];
+  const int written = snprintf(fixture, sizeof(fixture), "%s/graph-%zu", root, count);
+  if (written < 0 || (size_t)written >= sizeof(fixture)) return -1.0;
+  if (!fixture_ready(fixture, count)) return -1.0;
+  char packages[PATH_CAPACITY];
+  if (!join_path(packages, fixture, "packages")) return -1.0;
+  char *arguments[] = {(char *)cli, "graph", packages, "--format", "json", NULL};
+  char label[64];
+  snprintf(label, sizeof(label), "graph %zu files", count);
+  return median_runtime(cli, arguments, label);
+}
+
+static int graph_scaling(const char *cli, const char *root) {
+  if (!make_directory(root)) return 2;
+  const double small = graph_runtime(cli, root, SMALL_GRAPH_FILES);
+  if (small <= 0.0) return 2;
+  const double large = graph_runtime(cli, root, FIXTURE_FILES);
+  if (large <= 0.0) return 2;
+  printf("median graph %d files %.3f ms, %d files %.3f ms; %.2fx runtime for %dx files "
+         "(baseline only)\n",
+         SMALL_GRAPH_FILES, small, FIXTURE_FILES, large, large / small,
+         FIXTURE_FILES / SMALL_GRAPH_FILES);
+  return 0;
+}
+
+static int check_budgets(const char *cli, const char *root) {
+  if (!fixture_ready(root, FIXTURE_FILES)) return 2;
   char source[PATH_CAPACITY];
-  if (!join_path(source, argv[2], "services/orders/create.ts")) return 2;
-  char *help[] = {argv[1], "--help", NULL};
-  char *check[] = {argv[1], "check", source, "--format", "json", NULL};
-  if (run_process(argv[1], check) != 0) return 2;
-  const double startup = median_runtime(argv[1], help, "startup");
-  const double warm_file = median_runtime(argv[1], check, "warm one-file");
+  if (!join_path(source, root, "services/orders/create.ts")) return 2;
+  char *help[] = {(char *)cli, "--help", NULL};
+  char *check[] = {(char *)cli, "check", source, "--format", "json", NULL};
+  if (run_process(cli, check) != 0) return 2;
+  const double startup = median_runtime(cli, help, "startup");
+  const double warm_file = median_runtime(cli, check, "warm one-file");
   printf("median startup %.3f ms (budget 10 ms), warm one-file %.3f ms (budget 50 ms)\n", startup,
          warm_file);
   const bool within_budgets =
       startup >= 0.0 && startup <= 10.0 && warm_file >= 0.0 && warm_file <= 50.0;
   return within_budgets ? 0 : 1;
+}
+
+int main(int argc, char **argv) {
+  if (argc == 4 && strcmp(argv[3], "--graph") == 0) return graph_scaling(argv[1], argv[2]);
+  if (argc != 3) return 2;
+  return check_budgets(argv[1], argv[2]);
 }

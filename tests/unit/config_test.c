@@ -345,16 +345,37 @@ static void unrelated_settings_do_not_configure_policy(void) {
   }
 }
 
-static void truncated_package_json_reports_errors(void) {
-  const char *source = "{\"metadata\":[{\"text\":\"\\ud83d\\ude00\"}],\"src-lint\":{}}";
+static void check_truncated_json(const char *path, const char *source) {
   char *content = strdup(source);
   CHECK(content != NULL);
-  for (size_t length = 0; length < strlen(source); length += 1) {
+  const size_t size = strlen(source);
+  for (size_t length = 0; length < size; length += 1) {
     memcpy(content, source, length);
     content[length] = '\0';
-    check_invalid("package.json", content, "invalid JSON configuration");
+    check_invalid(path, content, "invalid JSON configuration");
   }
   free(content);
+}
+
+static void truncated_json_strings_report_errors(void) {
+  check_truncated_json("package.json",
+                       "{\"metadata\":[{\"text\":\"\\ud83d\\ude00\"}],\"src-lint\":{}}");
+  check_truncated_json(".src-lintrc.json",
+                       "{\"boundaries\":{\"billing\":{\"root\":\"a\\\"b\\\\c\\ud83d\\ude00\"}}}");
+}
+
+static void json_string_sizes_preserve_decoded_values(void) {
+  const char *encoded[] = {
+      "", "a", "quote\\\"entry", "slash\\\\", "\\u0061pi", "\\ud83d\\ude00", "\xc3\xa9"};
+  const char *decoded[] = {"",        "a", "quote\"entry", "slash\\", "api", "\xf0\x9f\x98\x80",
+                           "\xc3\xa9"};
+  for (size_t index = 0; index < COUNT(encoded); index += 1) {
+    char source[256];
+    const int written = snprintf(
+        source, sizeof(source), "{\"boundaries\":{\"billing\":{\"root\":\"%s\"}}}", encoded[index]);
+    CHECK(written > 0 && (size_t)written < sizeof(source));
+    check_decoded_root(".src-lintrc.json", source, decoded[index]);
+  }
 }
 
 static void decoded_strings_preserve_policy_text(void) {
@@ -397,7 +418,8 @@ int main(void) {
   invalid_yaml_reports_errors();
   invalid_embedded_configs_report_errors();
   unrelated_settings_do_not_configure_policy();
-  truncated_package_json_reports_errors();
+  truncated_json_strings_report_errors();
+  json_string_sizes_preserve_decoded_values();
   decoded_strings_preserve_policy_text();
   policy_changes_invalidate_hash();
   return 0;

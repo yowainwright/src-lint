@@ -13,6 +13,8 @@ typedef struct {
   SlFormat format;
   bool strict;
   const char *config_path;
+  /* Optional base for relative scan paths and configuration boundary paths. */
+  const char *config_root;
 } SlCheckOptions;
 
 typedef struct {
@@ -21,6 +23,8 @@ typedef struct {
   SlFormat format;
   bool strict;
   const char *config_path;
+  /* Optional base for relative scan paths and configuration boundary paths. */
+  const char *config_root;
 } SlRunOptions;
 
 int sl_check(const SlCheckOptions *options, FILE *output, FILE *errors);
