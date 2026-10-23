@@ -25,6 +25,9 @@ typedef struct {
   size_t line;
   size_t column;
   SlLanguage language;
+  const char *heredoc_end;
+  size_t heredoc_line;
+  size_t heredoc_column;
 } SlNativeScanner;
 
 static bool begins(const char *text, const char *prefix) {
@@ -107,9 +110,20 @@ static bool skip_comment(SlNativeScanner *scanner) {
   return skip_ruby_document(scanner);
 }
 
+static void finish_heredocs(SlNativeScanner *scanner) {
+  if (!scanner->heredoc_end) return;
+  scanner->cursor = scanner->heredoc_end;
+  scanner->line = scanner->heredoc_line;
+  scanner->column = scanner->heredoc_column;
+  scanner->heredoc_end = NULL;
+}
+
 static void skip_trivia(SlNativeScanner *scanner) {
   for (;;) {
-    while (isspace((unsigned char)*scanner->cursor)) advance(scanner);
+    while (isspace((unsigned char)*scanner->cursor)) {
+      if (*scanner->cursor == '\n') finish_heredocs(scanner);
+      advance(scanner);
+    }
     if (!skip_comment(scanner)) return;
   }
 }
@@ -300,15 +314,28 @@ static bool skip_heredoc_body(SlNativeScanner *scanner, const char *label, size_
 
 static size_t heredoc_label_length(const char *label, char quote) {
   const char *end = label;
+  const bool identifier = word_part(*label) && !isdigit((unsigned char)*label) && *label != '$';
+  if (!quote && !identifier) return 0;
   if (!quote) {
-    const bool identifier = word_part(*label) && !isdigit((unsigned char)*label) && *label != '$';
-    if (!identifier) return 0;
     while (word_part(*end)) end += 1;
     return (size_t)(end - label);
   }
   while (*end && *end != quote && *end != '\r' && *end != '\n') end += 1;
   if (*end != quote) return 0;
   return (size_t)(end - label);
+}
+
+static bool begin_heredoc(SlNativeScanner *scanner, SlNativeToken marker, bool indented) {
+  SlNativeScanner body = *scanner;
+  finish_heredocs(&body);
+  if (!skip_heredoc_body(&body, marker.start, marker.length, indented)) return false;
+  scanner->heredoc_end = body.cursor;
+  scanner->heredoc_line = body.line;
+  scanner->heredoc_column = body.column;
+  const size_t width = (size_t)(marker.start - scanner->cursor) + marker.length;
+  advance_bytes(scanner, width);
+  if (marker.quote) advance(scanner);
+  return true;
 }
 
 static bool skip_heredoc(SlNativeScanner *scanner) {
@@ -324,7 +351,8 @@ static bool skip_heredoc(SlNativeScanner *scanner) {
   if (quoted) label += 1;
   const size_t length = heredoc_label_length(label, quote);
   if (!length) return false;
-  return skip_heredoc_body(scanner, label, length, indented);
+  const SlNativeToken marker = {.start = label, .length = length, .quote = quote};
+  return begin_heredoc(scanner, marker, indented);
 }
 
 static bool skip_special_string(SlNativeScanner *scanner) {
@@ -431,6 +459,14 @@ static bool add_literal(SlImportList *list, SlNativeToken token, SlLanguage lang
   return add_token(list, token, value, language);
 }
 
+static bool call_terminator(SlNativeToken token) {
+  return token_is(token, ";") || token_is(token, "}") || token_is(token, ")") ||
+         token_is(token, "]") || token_is(token, "if") || token_is(token, "unless") ||
+         token_is(token, "or") || token_is(token, "and") || token_is(token, "end") ||
+         token_is(token, "while") || token_is(token, "until") || token_is(token, "rescue") ||
+         token_is(token, "do");
+}
+
 static bool parse_call(SlNativeScanner *scanner, SlNativeToken keyword, SlImportList *list) {
   SlNativeScanner call = *scanner;
   SlNativeToken path = next_token(&call);
@@ -439,9 +475,8 @@ static bool parse_call(SlNativeScanner *scanner, SlNativeToken keyword, SlImport
   if (path.kind != TOKEN_STRING || !path.literal) return true;
   const SlNativeToken after = peek_token(call);
   if (parentheses && !token_is(after, ")")) return true;
-  if (!parentheses && after.kind != TOKEN_END && after.line == path.line && !token_is(after, ";") &&
-      !token_is(after, "if") && !token_is(after, "unless"))
-    return true;
+  const bool continued = !parentheses && after.kind != TOKEN_END && after.line == path.line;
+  if (continued && !call_terminator(after)) return true;
   const bool relative = !token_is(keyword, "require");
   *scanner = call;
   return add_literal(list, path, scanner->language, relative);
@@ -477,8 +512,12 @@ static bool swift_import_kind(SlNativeToken token) {
 }
 
 static bool add_named_import(SlNativeScanner *scanner, SlNativeToken first, SlImportList *list) {
+  const bool relative = scanner->language == SL_LANGUAGE_JULIA && token_is(first, ".");
+  while (relative && token_is(first, ".")) first = next_token(scanner);
+  if (first.kind != TOKEN_WORD) return true;
   char name[SL_PATH_CAPACITY];
   if (!read_name(scanner, first, name)) return false;
+  if (relative) return true;
   char *member = strchr(name, '/');
   if (scanner->language == SL_LANGUAGE_SWIFT && member) *member = '\0';
   return add_token(list, first, name, scanner->language);
@@ -501,12 +540,13 @@ static bool parse_named_import(SlNativeScanner *scanner, SlImportList *list) {
     first = next_token(scanner);
   if (scanner->language == SL_LANGUAGE_SWIFT && swift_import_kind(first))
     first = next_token(scanner);
-  while (first.kind == TOKEN_WORD) {
+  for (;;) {
+    const bool relative = scanner->language == SL_LANGUAGE_JULIA && token_is(first, ".");
+    if (first.kind != TOKEN_WORD && !relative) return true;
     if (!add_named_import(scanner, first, list)) return false;
     if (!next_julia_import(scanner)) return true;
     first = next_token(scanner);
   }
-  return true;
 }
 
 static bool parse_module_source(SlNativeScanner *scanner, SlImportList *list) {

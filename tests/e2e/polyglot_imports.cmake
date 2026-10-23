@@ -89,12 +89,34 @@ set(extension jl)
 set(root "${WORK_ROOT}/jl")
 file(WRITE "${root}/orders/main.jl" "using Billing\n")
 run_language(check 1)
+foreach(source "using .Utils, Billing\n" "using Orders, .Utils, Billing\n")
+  file(WRITE "${root}/orders/main.jl" "${source}")
+  foreach(command check discover graph)
+    run_language("${command}" 1)
+  endforeach()
+endforeach()
 
 # Ruby load-path imports can use the existing configured boundary-root matching.
 set(extension rb)
 set(root "${WORK_ROOT}/rb")
 file(WRITE "${root}/orders/main.rb" "require 'billing/internal/Ledger'\n")
 run_language(check 1)
+foreach(source "task { require_relative '../billing/internal/Ledger' }\n"
+    "require 'billing/internal/Ledger' or abort\n"
+    "puts <<A, <<B; require_relative '../billing/internal/Ledger'\nfirst\nA\nsecond\nB\n")
+  file(WRITE "${root}/orders/main.rb" "${source}")
+  foreach(command check discover graph)
+    run_language("${command}" 1)
+  endforeach()
+endforeach()
+file(WRITE "${root}/orders/main.rb"
+  "puts <<A, <<B\nfirst\nA\nrequire_relative '../billing/internal/Ledger'\nB\n")
+run_language(check 0 --strict)
+run_language(graph 0)
+string(JSON count LENGTH "${last_output}" edges)
+if(NOT count EQUAL 0)
+  message(FATAL_ERROR "Ruby heredoc text produced an import: ${last_output}")
+endif()
 
 # Ruby require './x' follows the process working directory, including on warm runs.
 file(WRITE "${root}/orders/main.rb" "require './billing/api/Ledger'\n")
